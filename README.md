@@ -89,15 +89,29 @@ against the real engine before being trusted.
   by re-running the harness (matched the exact Day 6 result) and by unit
   tests for every project phase (build coop, buy, pickup, place, feed,
   harvest, care, idle-fallback-to-crops).
+- **Day 7-10, real engine regression caught:** first `real_engine_test.py`
+  run against the new goose code showed a real drop - 4,833 vs `starter`
+  (down from Day 6's 12,258), opponent's score essentially unchanged
+  (3,516 vs 3,506). Root cause: with only 2 target hands, dedicating one
+  to the goose project cut real crop-tile coverage by a third, and the
+  daily feed requirement pulled that hand back to the coop every day for
+  the rest of the game - a bad trade for one $50/day animal. Fixed by
+  raising the hand target to 3 and only ever assigning the goose project
+  to the 3rd hand, once all 3 are hired - the farmer and first 2 hands
+  now never get pulled off crop duty. Re-verified with unit tests before
+  the next real-engine run (not yet re-run against the real engine as of
+  this entry - do that before resubmitting to Kaggle).
 
 ## Status: Day 7-10
 
-Farmer + up to 2 hired hands work the crop loop (wheat, carrot). Once at
-least one hand is hired, it takes on a goose project on top of its crop
-work: builds a coop, buys and places a goose, then keeps it fed, cared
-for, and harvested - falling back to crop tasks whenever the goose
-doesn't currently need attention. Still no cow/sheep, land expansion,
-fertilizer, or premium crops.
+Farmer + up to 3 hired hands. The first 2 hands always stay on the crop
+loop (wheat, carrot) - only the 3rd hand, once hired, takes on the goose
+project (coop, purchase, place, feed/care/harvest), falling back to crop
+tasks whenever the goose doesn't need attention. Earlier version
+assigned the 2nd hand instead and caused a real regression in testing -
+see the decisions log. **Not yet re-confirmed against the real engine
+since the fix - do that before resubmitting to Kaggle.** Still no
+cow/sheep, land expansion, fertilizer, or premium crops.
 
 ## Structure
 

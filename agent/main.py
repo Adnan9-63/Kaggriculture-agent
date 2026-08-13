@@ -30,7 +30,7 @@ crops, throttled selling.
 BOARD_SIZE = 10
 SEED_BUFFER = 200          # cash kept in reserve before buying seed
 HAND_CASH_RESERVE = 300    # cash kept in reserve before hiring a hand
-TARGET_HAND_COUNT = 2      # ramp slowly - more hands only help if fed with tasks
+TARGET_HAND_COUNT = 3      # 2 dedicated to crops + 1 dedicated to the goose project
 
 CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20}
 # "Time to Max Yield" for one-time crops, unfertilized (from the spec
@@ -272,14 +272,17 @@ def agent(obs):
             hires_today += 1
             current_hands += 1
 
-    # --- positions: farmer first, then hands. The animal handler is the
-    #     LAST unit (most recently hired hand) - but ONLY once we have at
-    #     least one hand. A lone farmer must never be pulled off crop duty
-    #     for the goose project, or nothing gets farmed at all while it's
-    #     stuck on a multi-step task with no one covering the crops. ---
+    # --- positions: farmer first, then hands. The animal handler is
+    #     ONLY the 3rd hand (index 3), and ONLY once all 3 target hands
+    #     are hired - the farmer and first 2 hands must never be pulled
+    #     off crop duty for the goose project. Without this, testing
+    #     showed a large regression: reassigning an existing crop hand
+    #     cut real crop-tile coverage by a third, and the goose's daily
+    #     feed requirement pulled that hand back to the coop every day
+    #     for the rest of the game - a bad trade for one $50/day animal. ---
     positions = [me["farmer"]] + list(me["hands"])
-    have_animal_handler = len(positions) > 1
-    handler_idx = len(positions) - 1 if have_animal_handler else None
+    have_animal_handler = len(positions) > TARGET_HAND_COUNT
+    handler_idx = TARGET_HAND_COUNT if have_animal_handler else None
 
     handler_busy = False
     if have_animal_handler:
