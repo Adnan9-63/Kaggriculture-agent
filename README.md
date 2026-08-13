@@ -75,15 +75,29 @@ against the real engine before being trusted.
   accurate remaining count. `tests/mock_harness.py` doesn't simulate
   hands (single-farmer only), so hiring/coordination logic is only
   validated by `tests/real_engine_test.py` against the real engine.
+- **Day 6, submitted to Kaggle:** first real submission
+  (`SubmissionStatus.COMPLETE`, initial rating 600 - the default starting
+  rating every submission gets before real match outcomes adjust it).
+- **Day 7-10:** added a goose (coop -> buy -> pickup -> place -> daily
+  feed/care/harvest), run by one dedicated handler unit on top of the
+  existing crop loop. Caught a real bug in testing: with only the farmer
+  and no hired hands yet, dedicating the sole unit to the multi-step
+  goose project left nothing farming crops at all while it was stuck
+  mid-project - the mock harness ran 240 turns doing nothing but PASS.
+  Fixed by only activating the goose project once at least one hand is
+  hired, so a lone farmer is never pulled off crop duty. Confirmed fixed
+  by re-running the harness (matched the exact Day 6 result) and by unit
+  tests for every project phase (build coop, buy, pickup, place, feed,
+  harvest, care, idle-fallback-to-crops).
 
-## Status: Day 6
+## Status: Day 7-10
 
-Farmer + up to 2 hired hands now work the farm together, coordinated so
-they never collide on the same tile or seed in a turn. Two crops in
-rotation (wheat, carrot). Hands are hired automatically at the start of
-each day once cash allows. Still no animals, land expansion, fertilizer,
-or premium crops — those come once this labor-scaling loop is confirmed
-stable on the real engine.
+Farmer + up to 2 hired hands work the crop loop (wheat, carrot). Once at
+least one hand is hired, it takes on a goose project on top of its crop
+work: builds a coop, buys and places a goose, then keeps it fed, cared
+for, and harvested - falling back to crop tasks whenever the goose
+doesn't currently need attention. Still no cow/sheep, land expansion,
+fertilizer, or premium crops.
 
 ## Structure
 
@@ -119,13 +133,13 @@ chmod 600 ~/.kaggle/access_token
 ## Test locally
 
 Quick sanity check (no internet needed, approximate rules, single farmer
-only — does not exercise hand/hiring logic):
+only — does not exercise hand/hiring/animal logic):
 ```bash
 python tests/mock_harness.py
 ```
 
 Real test (needs `pip install kaggle-environments`, matches actual rules,
-including hands):
+including hands and the goose project):
 ```bash
 python tests/real_engine_test.py
 ```
@@ -147,7 +161,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 6: hands + carrot"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 7-10: goose (coop, buy, place, feed/care/harvest)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -160,8 +174,9 @@ often, no cost to iterating.
 
 - [x] Day 1-5: safe single-farmer wheat loop
 - [x] Day 6: add carrot, hire up to 2 hands with coordinated task assignment
-- [ ] Day 7-10: animals (goose -> cow), throttled selling for premium goods
-- [ ] Week 2-3: land expansion once labor covers it, fertilizer on melon
+- [x] Day 7-10: goose project (coop, purchase, place, feed/care/harvest)
+- [ ] Week 2-3: cow, throttled selling for premium goods, land expansion
+      once labor covers it, fertilizer on melon
 - [ ] Week 3-4: react to town shop unlocks, tune sell-throttling against real
       market data pulled from replays
 - [ ] Week 4-6: iterate against ladder opponents using downloaded replays/logs
