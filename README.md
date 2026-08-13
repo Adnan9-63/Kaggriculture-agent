@@ -39,16 +39,16 @@ So the real competition is:
 
 ## Development approach
 
-Days 1-5 focus on getting a provably correct core loop before adding any
+Days 1-5 focused on getting a provably correct core loop before adding any
 complexity: single farmer, wheat only, safety-first (nothing ever goes
 unwatered or unfed). Every change gets tested locally before being pushed
 — first against a hand-built local approximation of the rules, then
 against the real `kaggle-environments` engine to confirm behavior matches.
 Bugs, failed assumptions, and design changes get logged below rather than
 silently fixed, so the reasoning behind the current version isn't lost.
-Hands, animals, additional crops, land expansion, and market-throttling
-logic come in afterward, once this base is confirmed stable on the
-leaderboard.
+Day 6 onward starts layering in labor scaling (hands), crop diversity,
+animals, land expansion, and market-throttling logic, always validated
+against the real engine before being trusted.
 
 ## Key decisions log
 
@@ -59,32 +59,47 @@ leaderboard.
   yield at 1 unit instead of up to 4, since one-time crops are cleared
   from the tile on harvest. Fixed by adding a per-crop maturity threshold
   before harvesting is allowed.
+- **Day 1-5, real engine confirmation:** ran `tests/real_engine_test.py`
+  against the actual `kaggle-environments` package. Result: 10,152 vs 0
+  against the built-in `random` agent, and 7,624 vs 3,506 against the
+  built-in `starter` agent — both `status=DONE`, no errors. Confirms the
+  agent's interface and core loop are correct against the real rules, not
+  just the local approximation.
+- **Day 6:** Added farm hands and a second crop (carrot). The main design
+  problem this introduces: multiple units acting in the same turn can
+  collide — two units both trying to plant the last seed in one turn
+  causes the game to silently discard *both* plant actions. Solved by
+  building one shared task list (water > harvest > plant) per turn,
+  assigning each unit its nearest unclaimed task, and tracking a local
+  seed budget as each unit's action is decided so later units see an
+  accurate remaining count. `tests/mock_harness.py` doesn't simulate
+  hands (single-farmer only), so hiring/coordination logic is only
+  validated by `tests/real_engine_test.py` against the real engine.
 
-## Status: Day 1-5
+## Status: Day 6
 
-A deliberately simple, safe baseline. Single farmer, wheat-only loop:
-water anything unwatered, harvest wheat once it's matured (not the moment
-it has *any* yield - see `agent/main.py` comments for why that matters),
-plant on empty tiles, sell wheat, buy more seed when out. No hands, no
-animals, no land expansion, no premium crops yet.
-
-**Why start this simple:** correctness first. A bot that never lets a
-plant die from neglect and never crashes beats a "smart" bot with a bug
-in it. Every future phase builds on top of this loop.
+Farmer + up to 2 hired hands now work the farm together, coordinated so
+they never collide on the same tile or seed in a turn. Two crops in
+rotation (wheat, carrot). Hands are hired automatically at the start of
+each day once cash allows. Still no animals, land expansion, fertilizer,
+or premium crops — those come once this labor-scaling loop is confirmed
+stable on the real engine.
 
 ## Structure
 
+```
 agent/
-main.py - the actual submission (must have an agent(obs) function)
-economics.py - offline planning tool, ranks crops/animals by $/tile/day
-and glut risk. Not part of the submission.
+  main.py        - the actual submission (must have an `agent(obs)` function)
+  economics.py   - offline planning tool, ranks crops/animals by $/tile/day
+                   and glut risk. Not part of the submission.
 tests/
-mock_harness.py - hand-rolled local simulator (approximate, not the
-real rules) for quick sanity checks without
-internet access
-real_engine_test.py - runs against the REAL kaggle-environments engine.
-Run this before trusting any result.
-
+  mock_harness.py     - hand-rolled local simulator (approximate, single
+                         farmer only, no hand simulation) for quick sanity
+                         checks without internet access
+  real_engine_test.py - runs against the REAL kaggle-environments engine.
+                         Run this before trusting any result, especially
+                         for hand/hiring behavior.
+```
 
 ## Setup (run this on your machine)
 
@@ -95,7 +110,6 @@ pip install -r requirements.txt
 ```
 
 Kaggle CLI auth (only needed for submitting, not for local testing):
-
 ```bash
 mkdir -p ~/.kaggle
 # paste your API token (from kaggle.com/settings/api) into ~/.kaggle/access_token
@@ -104,14 +118,14 @@ chmod 600 ~/.kaggle/access_token
 
 ## Test locally
 
-Quick sanity check (no internet needed, approximate rules):
-
+Quick sanity check (no internet needed, approximate rules, single farmer
+only — does not exercise hand/hiring logic):
 ```bash
 python tests/mock_harness.py
 ```
 
-Real test (needs `pip install kaggle-environments`, matches actual rules):
-
+Real test (needs `pip install kaggle-environments`, matches actual rules,
+including hands):
 ```bash
 python tests/real_engine_test.py
 ```
@@ -133,7 +147,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 1-5: safe wheat loop"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 6: hands + carrot"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -145,8 +159,8 @@ often, no cost to iterating.
 ## Roadmap
 
 - [x] Day 1-5: safe single-farmer wheat loop
-- [ ] Day 6-8: add carrot, hire 2-3 hands with fixed roles (water/harvest/animal duty)
-- [ ] Week 2: add animals (goose -> cow), throttled selling for premium goods
+- [x] Day 6: add carrot, hire up to 2 hands with coordinated task assignment
+- [ ] Day 7-10: animals (goose -> cow), throttled selling for premium goods
 - [ ] Week 2-3: land expansion once labor covers it, fertilizer on melon
 - [ ] Week 3-4: react to town shop unlocks, tune sell-throttling against real
       market data pulled from replays
