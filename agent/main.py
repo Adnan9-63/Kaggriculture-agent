@@ -47,6 +47,20 @@ HIRE_COST_SEQUENCE = [1, 1, 2, 3, 5, 8, 13, 21, 34]
 ANIMAL_COST = {"GOOSE": 300}
 ANIMAL_CASH_RESERVE = 300  # keep this much in reserve before buying an animal
 
+# Costs increase for each quadrant beyond the starting NW one - per spec:
+# "$1k, $2k, $4k". Only buy once we have full labor (all target hands
+# hired) - expanding land before there's anyone to work it just leaves
+# the new tiles idle while cash sits locked in dirt.
+#
+# Capped at ONE extra quadrant for now, not all three. Testing (see
+# tests/full_harness.py) showed buying all 3 ($7,000 total) with only 3
+# crop workers (farmer + 2 hands) left most of the new 75 tiles unused -
+# labor can't cover 100 tiles with 3 workers, so the cash just sat idle
+# instead of compounding through more seed/crop cycles. Revisit raising
+# this once crop-worker count actually scales up.
+LAND_COST_SEQUENCE = [1000]
+LAND_CASH_RESERVE = 500
+
 
 def is_ready_to_harvest(tile, day):
     crop = tile.get("crop")
@@ -271,6 +285,17 @@ def agent(obs):
             money -= cost
             hires_today += 1
             current_hands += 1
+
+    # --- buy land once fully staffed and cash allows - expanding before
+    #     labor exists just leaves new tiles idle ---
+    unlocked_quadrants = me.get("unlocked_quadrants", ["NW"])
+    if hour == 0 and current_hands >= TARGET_HAND_COUNT:
+        land_idx = len(unlocked_quadrants) - 1
+        if 0 <= land_idx < len(LAND_COST_SEQUENCE):
+            land_cost = LAND_COST_SEQUENCE[land_idx]
+            if money - LAND_CASH_RESERVE >= land_cost:
+                market.append(["BUY_LAND"])
+                money -= land_cost
 
     # --- positions: farmer first, then hands. The animal handler is
     #     ONLY the 3rd hand (index 3), and ONLY once all 3 target hands

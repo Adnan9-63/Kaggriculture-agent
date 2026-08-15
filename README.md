@@ -101,17 +101,33 @@ against the real engine before being trusted.
   now never get pulled off crop duty. Re-verified with unit tests before
   the next real-engine run (not yet re-run against the real engine as of
   this entry - do that before resubmitting to Kaggle).
+- **Day 7-10, submitted to Kaggle:** rating 414.0 shortly after going
+  live, above Day 6's 382.8 at the same point. Day 6's own rating kept
+  drifting down (600 -> 397 -> 382.8) as it played more real ladder
+  opponents - expected, since it's a simpler bot than what many of the
+  4,151 competing teams have likely built.
+- **Day 11, land expansion:** added `BUY_LAND`, gated on being fully
+  staffed (all 3 target hands hired) and having cash to spare - buying
+  land before there's labor to work it just locks cash in unused dirt.
+  Testing in `tests/full_harness.py` caught a real mistake before it
+  shipped: buying all 3 available quadrants ($7,000 total) with only 3
+  crop workers (farmer + 2 hands, unchanged since Day 6) left most of
+  the new 75 tiles unused - final money came out LOWER than not buying
+  land at all (8,230 vs 13,535). Capped land expansion to 1 extra
+  quadrant only, matching current labor capacity - re-tested at 14,230,
+  a genuine net gain over the no-land baseline. Revisit raising the cap
+  once crop-worker count actually scales up in a future day.
 
-## Status: Day 7-10
+## Status: Day 11
 
-Farmer + up to 3 hired hands. The first 2 hands always stay on the crop
-loop (wheat, carrot) - only the 3rd hand, once hired, takes on the goose
-project (coop, purchase, place, feed/care/harvest), falling back to crop
-tasks whenever the goose doesn't need attention. Earlier version
-assigned the 2nd hand instead and caused a real regression in testing -
-see the decisions log. **Not yet re-confirmed against the real engine
-since the fix - do that before resubmitting to Kaggle.** Still no
-cow/sheep, land expansion, fertilizer, or premium crops.
+Farmer + up to 3 hired hands. First 2 hands stay on crops (wheat,
+carrot); the 3rd runs the goose project. Once fully staffed and cash
+allows, buys one additional quadrant (NE) - capped there for now since
+testing showed buying more than labor can cover actively loses money
+(see decisions log). Submitted to Kaggle through Day 7-10; this land
+expansion version not yet submitted - confirm against the real engine
+first. Still no cow/sheep, fertilizer, premium crops, or throttled
+selling.
 
 ## Structure
 
@@ -175,7 +191,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 7-10: goose (coop, buy, place, feed/care/harvest)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 11: land expansion (capped to labor capacity)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -189,8 +205,9 @@ often, no cost to iterating.
 - [x] Day 1-5: safe single-farmer wheat loop
 - [x] Day 6: add carrot, hire up to 2 hands with coordinated task assignment
 - [x] Day 7-10: goose project (coop, purchase, place, feed/care/harvest)
-- [ ] Week 2-3: cow, throttled selling for premium goods, land expansion
-      once labor covers it, fertilizer on melon
+- [x] Day 11: land expansion, capped to current labor capacity
+- [ ] Next: scale crop-worker count so a larger land cap pays off, cow,
+      throttled selling for premium goods, fertilizer on melon
 - [ ] Week 3-4: react to town shop unlocks, tune sell-throttling against real
       market data pulled from replays
 - [ ] Week 4-6: iterate against ladder opponents using downloaded replays/logs
