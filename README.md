@@ -117,17 +117,30 @@ against the real engine before being trusted.
   quadrant only, matching current labor capacity - re-tested at 14,230,
   a genuine net gain over the no-land baseline. Revisit raising the cap
   once crop-worker count actually scales up in a future day.
+- **Day 11, land expansion reverted:** the capped-to-1-quadrant version
+  above tested well locally (14,230 vs 13,535) but was a real regression
+  against the actual engine: $7,090 vs the Day 7-10 baseline's $9,621,
+  reproduced identically across two runs with the same fixed seed. The
+  local simulator's flat pricing and lack of weed spawning couldn't
+  predict this - most likely cause is that more owned tiles means more
+  daily weed-spawn opportunities, and the NE quadrant is genuinely
+  farther from the shed hub, costing real travel time the local model
+  never charged for. **Land expansion is disabled (`LAND_COST_SEQUENCE =
+  []`) until crop-worker count scales up enough to absorb the extra
+  distance and weed load.** Lesson: the local simulator is good for
+  catching logic bugs (crashes, stuck units, wrong action usage) but
+  not reliable for economic tuning decisions - those need the real
+  engine, ideally under a fixed seed for a fair before/after comparison.
 
 ## Status: Day 11
 
 Farmer + up to 3 hired hands. First 2 hands stay on crops (wheat,
-carrot); the 3rd runs the goose project. Once fully staffed and cash
-allows, buys one additional quadrant (NE) - capped there for now since
-testing showed buying more than labor can cover actively loses money
-(see decisions log). Submitted to Kaggle through Day 7-10; this land
-expansion version not yet submitted - confirm against the real engine
-first. Still no cow/sheep, fertilizer, premium crops, or throttled
-selling.
+carrot); the 3rd runs the goose project. Land expansion code exists but
+is **disabled** - tested well locally, but was a confirmed real
+regression against the actual engine (see decisions log). Current live
+economics match the Day 7-10 goose version (seeded real-engine result:
+$9,621 vs $3,483 opponent). Still no cow/sheep, fertilizer, premium
+crops, or throttled selling.
 
 ## Structure
 
@@ -191,7 +204,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 11: land expansion (capped to labor capacity)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 11: land expansion disabled after real-engine regression, goose economics intact"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -205,8 +218,9 @@ often, no cost to iterating.
 - [x] Day 1-5: safe single-farmer wheat loop
 - [x] Day 6: add carrot, hire up to 2 hands with coordinated task assignment
 - [x] Day 7-10: goose project (coop, purchase, place, feed/care/harvest)
-- [x] Day 11: land expansion, capped to current labor capacity
-- [ ] Next: scale crop-worker count so a larger land cap pays off, cow,
+- [x] Day 11: land expansion attempted, tested and confirmed net-negative
+      against the real engine, disabled pending more crop labor
+- [ ] Next: scale crop-worker count (then revisit land expansion), cow,
       throttled selling for premium goods, fertilizer on melon
 - [ ] Week 3-4: react to town shop unlocks, tune sell-throttling against real
       market data pulled from replays

@@ -48,17 +48,22 @@ ANIMAL_COST = {"GOOSE": 300}
 ANIMAL_CASH_RESERVE = 300  # keep this much in reserve before buying an animal
 
 # Costs increase for each quadrant beyond the starting NW one - per spec:
-# "$1k, $2k, $4k". Only buy once we have full labor (all target hands
-# hired) - expanding land before there's anyone to work it just leaves
-# the new tiles idle while cash sits locked in dirt.
+# "$1k, $2k, $4k".
 #
-# Capped at ONE extra quadrant for now, not all three. Testing (see
-# tests/full_harness.py) showed buying all 3 ($7,000 total) with only 3
-# crop workers (farmer + 2 hands) left most of the new 75 tiles unused -
-# labor can't cover 100 tiles with 3 workers, so the cash just sat idle
-# instead of compounding through more seed/crop cycles. Revisit raising
-# this once crop-worker count actually scales up.
-LAND_COST_SEQUENCE = [1000]
+# DISABLED for now (empty list). Tested capped at 1 extra quadrant and it
+# looked like a net win in tests/full_harness.py (14,230 vs 13,535 with
+# no land) - but that local simulator uses flat pricing and doesn't spawn
+# weeds at all. Against the REAL engine (tests/diagnostic_test.py, same
+# fixed seed as the no-land goose version), it was a real regression:
+# $7,090 vs $9,621, reproduced identically twice. Real cause, most likely:
+# more owned tiles means more weed-spawn opportunities per day (each
+# empty tile spawns a weed independently), and the NE quadrant is
+# genuinely farther from the shed hub, so units spend more time
+# traveling and less time watering/harvesting - exactly the labor
+# bottleneck the strategy doc warned about, which my local simulator
+# couldn't see. Revisit only once crop-worker count scales up enough to
+# actually absorb the extra distance and weed-cleanup load.
+LAND_COST_SEQUENCE = []
 LAND_CASH_RESERVE = 500
 
 
