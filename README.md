@@ -131,13 +131,24 @@ against the real engine before being trusted.
   catching logic bugs (crashes, stuck units, wrong action usage) but
   not reliable for economic tuning decisions - those need the real
   engine, ideally under a fixed seed for a fair before/after comparison.
+- **Day 12, scaling crop-worker count:** ran a controlled local sweep of
+  `TARGET_HAND_COUNT` (3 through 6) in `tests/full_harness.py` before
+  touching the code, applying the Day 11 lesson upfront. Results: money
+  peaked at 4 hands (14,255 vs 3 hands' 13,535), flattened at 5, dropped
+  at 6 - and wasted-turn count climbed steadily the whole way, confirming
+  the 25-tile NW quadrant can't usefully absorb much more than ~4
+  workers. Set `TARGET_HAND_COUNT = 4`. **This is a local result only -
+  per the Day 11 lesson, treat it as unconfirmed until verified against
+  the real engine with the same fixed seed used for the $9,621 baseline.
+  Do not submit until that comparison is in hand.**
 
-## Status: Day 11
+## Status: Day 12
 
-Farmer + up to 3 hired hands. First 2 hands stay on crops (wheat,
-carrot); the 3rd runs the goose project. Land expansion code exists but
+Farmer + up to 4 hired hands (raised from 3, see decisions log - **not
+yet confirmed against the real engine**). 3 hands stay on crops (wheat,
+carrot); the 4th runs the goose project. Land expansion code exists but
 is **disabled** - tested well locally, but was a confirmed real
-regression against the actual engine (see decisions log). Current live
+regression against the actual engine (see decisions log). Last confirmed
 economics match the Day 7-10 goose version (seeded real-engine result:
 $9,621 vs $3,483 opponent). Still no cow/sheep, fertilizer, premium
 crops, or throttled selling.
@@ -204,7 +215,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 11: land expansion disabled after real-engine regression, goose economics intact"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 12: scale crop hands to 4 (verify vs 9621 seeded baseline first)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -220,8 +231,10 @@ often, no cost to iterating.
 - [x] Day 7-10: goose project (coop, purchase, place, feed/care/harvest)
 - [x] Day 11: land expansion attempted, tested and confirmed net-negative
       against the real engine, disabled pending more crop labor
-- [ ] Next: scale crop-worker count (then revisit land expansion), cow,
-      throttled selling for premium goods, fertilizer on melon
+- [ ] Day 12: scale crop hands to 4 - local sweep done, **needs seeded
+      real-engine confirmation before submitting** (see decisions log)
+- [ ] Next: cow, throttled selling for premium goods, fertilizer on
+      melon, revisit land expansion once labor genuinely scales
 - [ ] Week 3-4: react to town shop unlocks, tune sell-throttling against real
       market data pulled from replays
 - [ ] Week 4-6: iterate against ladder opponents using downloaded replays/logs

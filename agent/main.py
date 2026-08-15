@@ -30,7 +30,13 @@ crops, throttled selling.
 BOARD_SIZE = 10
 SEED_BUFFER = 200          # cash kept in reserve before buying seed
 HAND_CASH_RESERVE = 300    # cash kept in reserve before hiring a hand
-TARGET_HAND_COUNT = 3      # 2 dedicated to crops + 1 dedicated to the goose project
+TARGET_HAND_COUNT = 4      # 3 dedicated to crops + 1 dedicated to the goose project
+# Tested 3-6 locally (tests/full_harness.py) before choosing this: money
+# peaked at 4 hands (14,255 vs 3 hands' 13,535), then flattened at 5 and
+# dropped at 6, with wasted-turn count climbing steadily the whole way -
+# the 25-tile NW quadrant can't usefully absorb more than ~4 workers.
+# This local result still needs real-engine confirmation before trusting
+# it (see Day 11's land-expansion lesson) - not yet submitted.
 
 CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20}
 # "Time to Max Yield" for one-time crops, unfertilized (from the spec
