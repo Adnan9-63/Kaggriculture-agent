@@ -57,6 +57,22 @@ TARGET_ANIMAL_HAND_COUNT = 2  # 1 for goose, 1 for cow - added on top of crop ha
 # price hard. Cap how much sells per turn instead.
 MILK_SELL_CAP_PER_TURN = 3
 
+# Wheat feeds every animal. Selling it all every turn (as if it were
+# only a sell good) can starve animals if selling empties the shed
+# before that day's feeding happens - see Day 13 decisions log for the
+# real bug this caused (repeated escape/re-buy cycles). Reserve this
+# many wheat per live animal before selling the rest.
+WHEAT_FEED_RESERVE_PER_ANIMAL = 3
+
+# An animal bought and placed before any wheat has ever been harvested
+# starves immediately and escapes within 2 days, no matter how much
+# wheat gets reserved later - reserving a share of zero is still zero.
+# Testing found exactly this: animals bought on day 0 (before wheat
+# matures on day 4) starved and got re-bought every single cycle, a
+# repeating $300-700 loss. Require a wheat buffer already banked in the
+# shed before buying, so the animal has something to eat from day one.
+WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE = 5
+
 # Costs increase for each quadrant beyond the starting NW one - per spec:
 # "$1k, $2k, $4k".
 #
@@ -173,9 +189,12 @@ def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
             move = step_toward(pos, target)
             return ([move] if move else ["PASS"], None, True, None)
 
-        # nothing in shed yet - try to buy one, handler free to farm meanwhile
+        # Don't buy until wheat is actually being produced - an animal
+        # bought before any wheat has been harvested starves and escapes
+        # within 2 days no matter what (see Day 13 decisions log).
         order = None
-        if money - ANIMAL_CASH_RESERVE >= ANIMAL_COST[animal]:
+        if (money - ANIMAL_CASH_RESERVE >= ANIMAL_COST[animal]
+                and shed.get("WHEAT", 0) >= WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE):
             order = ["BUY_ANIMAL", animal, 1]
         return (None, order, False, None)
 
@@ -264,6 +283,30 @@ def decide_crop_action(pos, tiles, day, remaining_seeds, target):
     return ["PASS"]
 
 
+def count_placed_animals(tiles, board_size):
+    """How many animals are actually alive on the farm right now (not
+    just how many handlers exist) - used to size the wheat feed reserve."""
+    count = 0
+    for y in range(board_size):
+        for x in range(board_size):
+            tile = tiles[y][x]
+            if isinstance(tile, dict) and tile.get("kind") in ("COOP", "PASTURE") and tile.get("animal"):
+                count += 1
+    return count
+
+
+def hold_position_action(pos, tiles, board_size, structure_kind):
+    """An idle handler's action when its animal doesn't currently need
+    attention: stay at (or return to) its structure rather than
+    wandering off, so it's instantly available the moment feeding is
+    needed again instead of risking a long trip back."""
+    structure_pos = find_structure(tiles, board_size, structure_kind)
+    if structure_pos is None or tuple(pos) == structure_pos:
+        return ["PASS"]
+    move = step_toward(pos, structure_pos)
+    return [move] if move else ["PASS"]
+
+
 def agent(obs):
     player = obs["player"]
     day = obs["day"]
@@ -283,9 +326,31 @@ def agent(obs):
     # --- sell: wheat/carrot/egg have low/medium glut risk, bulk-sell is
     #     safe (see economics.py). Milk is HIGH glut risk (above_target
     #     1.60) - dumping the whole shed at once would crash its own
-    #     price, so cap how much sells per turn instead. ---
+    #     price, so cap how much sells per turn instead.
+    #
+    #     WHEAT is also what feeds every animal. Selling 100% of it every
+    #     turn was a real bug (see Day 13 decisions log): with two
+    #     animals now competing for the same wheat, our own sell order
+    #     could empty the shed before that day's feeding happened, an
+    #     animal would starve, escape after 2 missed days, and get
+    #     re-bought - a $300-400 loss repeating over and over. Reserve
+    #     enough wheat per live animal before selling the rest. ---
+    # Reserve enough to cover live animals' daily feed, PLUS the flat
+    # purchase buffer so it can actually accumulate BEFORE any animal
+    # exists - otherwise selling 100% of wheat pre-purchase means the
+    # buy-gate threshold above never gets reached at all. Only reserve
+    # the purchase buffer once there's actually hand capacity for a
+    # handler - no point withholding wheat for an animal that has no
+    # chance of being bought yet (e.g. solo farmer, early game).
+    animal_count = count_placed_animals(tiles, board_size)
+    have_handler_capacity = len(me.get("hands", [])) > TARGET_CROP_HAND_COUNT
+    wheat_reserve = WHEAT_FEED_RESERVE_PER_ANIMAL * animal_count
+    if have_handler_capacity:
+        wheat_reserve += WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE
     for item in ("WHEAT", "CARROT", "EGG"):
         n = shed.get(item, 0)
+        if item == "WHEAT":
+            n = max(0, n - wheat_reserve)
         if n > 0:
             market.append(["SELL", item, n])
     milk_n = shed.get("MILK", 0)
@@ -340,7 +405,17 @@ def agent(obs):
     goose_slot = TARGET_CROP_HAND_COUNT + 1
     cow_slot = TARGET_CROP_HAND_COUNT + 2
 
-    handler_slots_busy = {}  # slot index -> (action_list,) for busy handlers
+    handler_slots = {}  # slot index -> action_list, for ALL handler slots
+                         # (busy or idle) - handlers NEVER do crop work,
+                         # even when idle. Testing found that letting an
+                         # idle handler wander into crop tasks could put
+                         # it far from its structure by the time the
+                         # animal needed feeding again, missing the
+                         # window and causing a starve/escape/re-buy
+                         # cycle - see Day 13 decisions log. An idle
+                         # handler instead holds position at its
+                         # structure, trading a little unused labor for
+                         # guaranteed same-turn feed response.
     goose_build_target = None
 
     if len(positions) > goose_slot:
@@ -352,9 +427,11 @@ def agent(obs):
         )
         if order:
             market.append(order)
-        if busy:
-            handler_slots_busy[goose_slot] = action
         goose_build_target = build_target
+        if busy:
+            handler_slots[goose_slot] = action
+        else:
+            handler_slots[goose_slot] = hold_position_action(pos, tiles, board_size, "COOP")
 
     if len(positions) > cow_slot:
         pos = positions[cow_slot]
@@ -367,10 +444,12 @@ def agent(obs):
         if order:
             market.append(order)
         if busy:
-            handler_slots_busy[cow_slot] = action
+            handler_slots[cow_slot] = action
+        else:
+            handler_slots[cow_slot] = hold_position_action(pos, tiles, board_size, "PASTURE")
 
     # --- coordinate remaining (non-handler-busy) units on crop tasks ---
-    crop_unit_indices = [i for i in range(len(positions)) if i not in handler_slots_busy]
+    crop_unit_indices = [i for i in range(len(positions)) if i not in handler_slots]
     crop_positions = [positions[i] for i in crop_unit_indices]
 
     seed_capacity = sum(seeds.values())
@@ -384,7 +463,7 @@ def agent(obs):
             positions[unit_i], tiles, day, remaining_seeds, assignments[list_i]
         )
 
-    for slot, action in handler_slots_busy.items():
+    for slot, action in handler_slots.items():
         actions[slot] = action
 
     return {

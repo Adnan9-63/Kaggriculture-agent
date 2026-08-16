@@ -223,7 +223,12 @@ def run(turns=720, verbose=True, label=""):
                     wasted_turns += 1
             elif act == "FEED":
                 if isinstance(tile, dict) and tile.get("kind") in ("COOP", "PASTURE") and tile.get("animal"):
-                    tile["fed_today"] = True
+                    if shed.get("WHEAT", 0) >= 1:
+                        shed["WHEAT"] -= 1
+                        tile["fed_today"] = True
+                    # else: FEED attempted but no wheat available - fails,
+                    # fed_today stays False, matching the real spec
+                    # ("FEED - Feed an animal using wheat")
                 else:
                     wasted_turns += 1
             elif act == "CARE":
@@ -250,9 +255,17 @@ def run(turns=720, verbose=True, label=""):
                             if age >= 2:
                                 t["yield_units"] = min(CAP.get(crop, 4), t["yield_units"] + 1)
                         t["watered_today"] = False
-                    elif t.get("kind") == "COOP" and t.get("animal"):
+                    elif t.get("kind") in ("COOP", "PASTURE") and t.get("animal"):
                         if t["fed_today"]:
-                            t["yield_units"] = min(4, t["yield_units"] + 1)  # goose max_held=4
+                            t["yield_units"] = min(4, t["yield_units"] + 1)  # max_held=4
+                            t["consecutive_unfed"] = 0
+                        else:
+                            t["consecutive_unfed"] = t.get("consecutive_unfed", 0) + 1
+                            if t["consecutive_unfed"] >= 2:
+                                # animal escapes - unrecoverable, per spec
+                                t["animal"] = None
+                                t["yield_units"] = 0
+                                t["consecutive_unfed"] = 0
                         t["fed_today"] = False
                         t["cared_today"] = False
             # hands disappear at end of day, drop inventory (simplified: discard)

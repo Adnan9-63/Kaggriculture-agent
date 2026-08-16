@@ -159,16 +159,60 @@ against the real engine before being trusted.
   figure is not treated as meaningful on its own - needs a seeded
   real-engine comparison against the $9,731 Day 12 baseline before
   submitting.**
+- **Day 13, real-engine catastrophe caught, two real bugs found and
+  fixed:** seeded real-engine test came back at $1,086 - a total
+  collapse, WORSE than the opponent's $3,504, down from the $9,731
+  baseline. The `hands` column oscillated between 5 and 0 day to day, a
+  strong clue something was cyclically failing. Extended
+  `tests/full_harness.py` to actually simulate wheat consumption on FEED
+  and animal escape after 2 missed days (it modeled neither before), and
+  added a turn-by-turn trace script to reproduce it locally. Found TWO
+  compounding bugs:
+  1. Animals were bought and placed on day 0 - before wheat even
+     matures (day 4 for wheat). No amount of "reserve some wheat for
+     feeding" can help when total wheat production is still zero; the
+     animal starves and escapes within 2 days no matter what.
+  2. The wheat reserve itself couldn't build up before any animal
+     existed, since the reserve formula was `3 * live_animal_count` -
+     zero live animals meant zero reserve, so 100% of wheat kept
+     getting sold every turn regardless.
+  Both animals were repeatedly starving, escaping, and getting
+  re-bought - each cycle a real $300-700 loss, explaining both the
+  money collapse and the flickering hand count (money too low to
+  afford full hiring some days). Fixed: (a) added
+  `WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE = 5` - won't buy an animal until
+  that much wheat is already banked in the shed, and (b) the sell
+  logic now reserves that same flat buffer even before any animal
+  exists, on top of the existing per-animal feed reserve, so the
+  buffer can actually accumulate toward the purchase gate. Also made
+  idle handlers hold position at their structure instead of wandering
+  into crop work, removing a secondary risk (a long trip back on the
+  day feeding is needed again). Re-traced after the fix: exactly 2
+  purchases total (1 goose, 1 cow), no further escapes, local money
+  improved to $15,165 (previous best was $14,255 without cow). **Still
+  needs a fresh seeded real-engine run before submitting - the local
+  number is not proof on its own, only the trace confirming the escape
+  cycle stopped is.** One more leak caught in the same pass: the flat
+  purchase buffer was being reserved even with zero hired hands (no
+  chance of ever buying an animal yet), silently costing the
+  solo-farmer path real sell revenue for nothing. Fixed by only
+  reserving the buffer once hand count actually exceeds the crop-hand
+  target; re-confirmed the solo-farmer mock harness result returned to
+  the exact $3,300 baseline.
 
 ## Status: Day 13
 
 Farmer + up to 5 hired hands. First 3 stay on crops (wheat, carrot); the
 4th runs the goose project, the 5th runs a cow project (pasture, buy,
 place, feed/care/harvest) - same crop-protection pattern as goose, never
-reassigns an existing crop hand. Milk sells throttled to 3/turn (high
-glut risk); wheat/carrot/egg still bulk-sell. Land expansion still
-disabled. **Not yet confirmed against the real engine - do not submit
-until verified against the $9,731 Day 12 seeded baseline.**
+reassigns an existing crop hand. Won't buy an animal until enough wheat
+is already banked to feed it (see decisions log - this fixed a real
+starve/escape/re-buy bug that crashed a real-engine test to $1,086).
+Idle handlers hold position at their structure instead of wandering into
+crop work. Milk sells throttled to 3/turn (high glut risk); wheat/
+carrot/egg still bulk-sell, with a reserve held back for animal feed.
+Land expansion still disabled. **Not yet confirmed against the real
+engine since the fix - do not submit until verified.**
 
 ## Structure
 
@@ -232,7 +276,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 13: cow + throttled milk selling (verify vs 9731 seeded baseline first)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 13: cow + fixed starve/re-buy bug (verify vs 9731 seeded baseline first)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
