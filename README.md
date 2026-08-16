@@ -141,17 +141,34 @@ against the real engine before being trusted.
   per the Day 11 lesson, treat it as unconfirmed until verified against
   the real engine with the same fixed seed used for the $9,621 baseline.
   Do not submit until that comparison is in hand.**
+- **Day 13, cow + throttled milk selling:** generalized the goose's
+  handler logic (`animal_handler_action`) to work for any animal/
+  structure pair instead of being hardcoded to goose/coop, then added a
+  5th hand as a dedicated cow handler (pasture, buy, place, feed/care/
+  harvest) on top of the existing goose handler - farmer + first 3 hands
+  still never touched, same crop-protection guarantee as Day 7-10's fix.
+  Added a per-turn sell cap for milk (`MILK_SELL_CAP_PER_TURN = 3`)
+  since it's high glut-risk (above_target 1.60 in economics.py) unlike
+  wheat/carrot/egg which stay on bulk-sell. Extended
+  `tests/full_harness.py` to simulate PASTURE/COW (it only knew COOP/
+  GOOSE before) and verified with unit tests: crop coverage holds with
+  only 3 hands, goose handler activates at 4 hands, both handlers run
+  independently at 5, milk sell orders cap correctly at 3/turn. Local
+  full-season run completed with no errors and both animals successfully
+  built/placed/maintained. **Per the Day 11 lesson, the local money
+  figure is not treated as meaningful on its own - needs a seeded
+  real-engine comparison against the $9,731 Day 12 baseline before
+  submitting.**
 
-## Status: Day 12
+## Status: Day 13
 
-Farmer + up to 4 hired hands (raised from 3, see decisions log - **not
-yet confirmed against the real engine**). 3 hands stay on crops (wheat,
-carrot); the 4th runs the goose project. Land expansion code exists but
-is **disabled** - tested well locally, but was a confirmed real
-regression against the actual engine (see decisions log). Last confirmed
-economics match the Day 7-10 goose version (seeded real-engine result:
-$9,621 vs $3,483 opponent). Still no cow/sheep, fertilizer, premium
-crops, or throttled selling.
+Farmer + up to 5 hired hands. First 3 stay on crops (wheat, carrot); the
+4th runs the goose project, the 5th runs a cow project (pasture, buy,
+place, feed/care/harvest) - same crop-protection pattern as goose, never
+reassigns an existing crop hand. Milk sells throttled to 3/turn (high
+glut risk); wheat/carrot/egg still bulk-sell. Land expansion still
+disabled. **Not yet confirmed against the real engine - do not submit
+until verified against the $9,731 Day 12 seeded baseline.**
 
 ## Structure
 
@@ -215,7 +232,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 12: scale crop hands to 4 (verify vs 9621 seeded baseline first)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 13: cow + throttled milk selling (verify vs 9731 seeded baseline first)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -233,8 +250,10 @@ often, no cost to iterating.
       against the real engine, disabled pending more crop labor
 - [ ] Day 12: scale crop hands to 4 - local sweep done, **needs seeded
       real-engine confirmation before submitting** (see decisions log)
-- [ ] Next: cow, throttled selling for premium goods, fertilizer on
-      melon, revisit land expansion once labor genuinely scales
+- [ ] Day 13: cow + throttled milk selling - built and locally tested,
+      **needs seeded real-engine confirmation before submitting**
+- [ ] Next: fertilizer on melon, sheep, more premium crops, revisit land
+      expansion once labor genuinely scales
 - [ ] Week 3-4: react to town shop unlocks, tune sell-throttling against real
       market data pulled from replays
 - [ ] Week 4-6: iterate against ladder opponents using downloaded replays/logs

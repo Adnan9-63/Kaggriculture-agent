@@ -30,13 +30,10 @@ crops, throttled selling.
 BOARD_SIZE = 10
 SEED_BUFFER = 200          # cash kept in reserve before buying seed
 HAND_CASH_RESERVE = 300    # cash kept in reserve before hiring a hand
-TARGET_HAND_COUNT = 4      # 3 dedicated to crops + 1 dedicated to the goose project
-# Tested 3-6 locally (tests/full_harness.py) before choosing this: money
-# peaked at 4 hands (14,255 vs 3 hands' 13,535), then flattened at 5 and
-# dropped at 6, with wasted-turn count climbing steadily the whole way -
-# the 25-tile NW quadrant can't usefully absorb more than ~4 workers.
-# This local result still needs real-engine confirmation before trusting
-# it (see Day 11's land-expansion lesson) - not yet submitted.
+TARGET_CROP_HAND_COUNT = 3   # farmer + these 3 = 4 crop workers, tested as the
+                              # sweet spot for the 25-tile NW quadrant (see
+                              # Day 12 decisions log)
+TARGET_HAND_COUNT = TARGET_CROP_HAND_COUNT + 2   # +1 goose handler, +1 cow handler
 
 CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20}
 # "Time to Max Yield" for one-time crops, unfertilized (from the spec
@@ -50,8 +47,15 @@ CROP_PRIORITY = ["WHEAT", "CARROT"]
 # Matches farmHandCostMult(=1) * fib(n), fib starting 1,1,2,3,5,8,...
 HIRE_COST_SEQUENCE = [1, 1, 2, 3, 5, 8, 13, 21, 34]
 
-ANIMAL_COST = {"GOOSE": 300}
+ANIMAL_COST = {"GOOSE": 300, "COW": 400}
 ANIMAL_CASH_RESERVE = 300  # keep this much in reserve before buying an animal
+
+TARGET_ANIMAL_HAND_COUNT = 2  # 1 for goose, 1 for cow - added on top of crop hands
+
+# Milk has high glut risk (above_target=1.60 per economics.py) - unlike
+# wheat/carrot/egg, dumping the whole shed at once would crash its own
+# price hard. Cap how much sells per turn instead.
+MILK_SELL_CAP_PER_TURN = 3
 
 # Costs increase for each quadrant beyond the starting NW one - per spec:
 # "$1k, $2k, $4k".
@@ -106,86 +110,95 @@ def nearest(pos, candidates):
     return min(candidates, key=lambda c: abs(c[0] - pos[0]) + abs(c[1] - pos[1]))
 
 
-def find_coop(tiles, board_size):
-    """Return (x, y) of the first COOP tile found, or None."""
+def find_structure(tiles, board_size, kind):
+    """Return (x, y) of the first structure tile of the given kind
+    (COOP or PASTURE) found, or None."""
     for y in range(board_size):
         for x in range(board_size):
             tile = tiles[y][x]
-            if isinstance(tile, dict) and tile.get("kind") == "COOP":
+            if isinstance(tile, dict) and tile.get("kind") == kind:
                 return (x, y)
     return None
 
 
-def find_empty_tile_from_corner(tiles, board_size):
+def find_empty_tile_from_corner(tiles, board_size, skip=None):
     """Scan for an empty tile starting from the bottom-right corner -
     crop planting scans from top-left, so this reduces (but doesn't
-    fully eliminate) both projects racing for the same tile."""
+    fully eliminate) projects racing for the same tile. `skip` excludes
+    a tile already claimed by another project this same turn (e.g. the
+    goose's coop, when the cow handler is also hunting for space)."""
     for y in range(board_size - 1, -1, -1):
         for x in range(board_size - 1, -1, -1):
-            if tiles[y][x] is None:
+            if tiles[y][x] is None and (x, y) != skip:
                 return (x, y)
     return None
 
 
-def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory):
-    """Decide the dedicated handler's action for the goose project this
-    turn. Returns (action_list, market_order_or_None, is_busy)."""
-    coop_pos = find_coop(tiles, board_size)
+def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
+                           animal, structure_kind, build_action, skip_tile=None):
+    """Decide a dedicated handler's action for an animal project this
+    turn (goose/coop or cow/pasture - same shape either way). Returns
+    (action_list, market_order_or_None, is_busy, build_target_or_None).
+    build_target is only set while still hunting for a spot to build on
+    (before the structure exists) - the caller passes it as skip_tile to
+    a second handler running the same turn, so two handlers never race
+    to build on the exact same empty tile before either action lands."""
+    structure_pos = find_structure(tiles, board_size, structure_kind)
 
-    if coop_pos is None:
-        target = find_empty_tile_from_corner(tiles, board_size)
+    if structure_pos is None:
+        target = find_empty_tile_from_corner(tiles, board_size, skip=skip_tile)
         if target is None:
-            return (["PASS"], None, True)
-        if pos == list(target) or tuple(pos) == target:
-            return (["BUILD_COOP"], None, True)
+            return (["PASS"], None, True, None)
+        if tuple(pos) == target:
+            return ([build_action], None, True, target)
         move = step_toward(pos, target)
-        return ([move] if move else ["PASS"], None, True)
+        return ([move] if move else ["PASS"], None, True, target)
 
-    coop_tile = tiles[coop_pos[1]][coop_pos[0]]
+    structure_tile = tiles[structure_pos[1]][structure_pos[0]]
 
-    if coop_tile.get("animal") is None:
-        shed_goose = shed.get("GOOSE", 0)
-        carried_goose = my_inventory.get("GOOSE", 0)
+    if structure_tile.get("animal") is None:
+        shed_count = shed.get(animal, 0)
+        carried_count = my_inventory.get(animal, 0)
 
-        if carried_goose > 0:
-            if tuple(pos) == coop_pos:
-                return (["PLACE", "GOOSE"], None, True)
-            move = step_toward(pos, coop_pos)
-            return ([move] if move else ["PASS"], None, True)
+        if carried_count > 0:
+            if tuple(pos) == structure_pos:
+                return (["PLACE", animal], None, True, None)
+            move = step_toward(pos, structure_pos)
+            return ([move] if move else ["PASS"], None, True, None)
 
-        if shed_goose > 0:
+        if shed_count > 0:
             target = nearest(pos, shed_adjacent_positions(board_size))
             if tuple(pos) == target:
-                return (["PICKUP", "GOOSE", 1], None, True)
+                return (["PICKUP", animal, 1], None, True, None)
             move = step_toward(pos, target)
-            return ([move] if move else ["PASS"], None, True)
+            return ([move] if move else ["PASS"], None, True, None)
 
         # nothing in shed yet - try to buy one, handler free to farm meanwhile
         order = None
-        if money - ANIMAL_CASH_RESERVE >= ANIMAL_COST["GOOSE"]:
-            order = ["BUY_ANIMAL", "GOOSE", 1]
-        return (None, order, False)
+        if money - ANIMAL_CASH_RESERVE >= ANIMAL_COST[animal]:
+            order = ["BUY_ANIMAL", animal, 1]
+        return (None, order, False, None)
 
     # animal is placed - only interrupt crop work when it actually needs us
     needs_attention = (
-        not coop_tile.get("fed_today")
-        or coop_tile.get("yield_units", 0) > 0
-        or not coop_tile.get("cared_today")
+        not structure_tile.get("fed_today")
+        or structure_tile.get("yield_units", 0) > 0
+        or not structure_tile.get("cared_today")
     )
     if not needs_attention:
-        return (None, None, False)
+        return (None, None, False, None)
 
-    if tuple(pos) != coop_pos:
-        move = step_toward(pos, coop_pos)
-        return ([move] if move else ["PASS"], None, True)
+    if tuple(pos) != structure_pos:
+        move = step_toward(pos, structure_pos)
+        return ([move] if move else ["PASS"], None, True, None)
 
-    if not coop_tile.get("fed_today"):
-        return (["FEED"], None, True)
-    if coop_tile.get("yield_units", 0) > 0:
-        return (["HARVEST"], None, True)
-    if not coop_tile.get("cared_today"):
-        return (["CARE"], None, True)
-    return (["PASS"], None, True)
+    if not structure_tile.get("fed_today"):
+        return (["FEED"], None, True, None)
+    if structure_tile.get("yield_units", 0) > 0:
+        return (["HARVEST"], None, True, None)
+    if not structure_tile.get("cared_today"):
+        return (["CARE"], None, True, None)
+    return (["PASS"], None, True, None)
 
 
 def find_targets(tiles, board_size, day, seed_capacity):
@@ -267,11 +280,17 @@ def agent(obs):
 
     market = []
 
-    # --- sell everything sellable in the shed ---
+    # --- sell: wheat/carrot/egg have low/medium glut risk, bulk-sell is
+    #     safe (see economics.py). Milk is HIGH glut risk (above_target
+    #     1.60) - dumping the whole shed at once would crash its own
+    #     price, so cap how much sells per turn instead. ---
     for item in ("WHEAT", "CARROT", "EGG"):
         n = shed.get(item, 0)
         if n > 0:
             market.append(["SELL", item, n])
+    milk_n = shed.get("MILK", 0)
+    if milk_n > 0:
+        market.append(["SELL", "MILK", min(milk_n, MILK_SELL_CAP_PER_TURN)])
 
     # --- buy seed for whichever crop we're out of, cheapest first ---
     for crop in CROP_PRIORITY:
@@ -308,30 +327,50 @@ def agent(obs):
                 market.append(["BUY_LAND"])
                 money -= land_cost
 
-    # --- positions: farmer first, then hands. The animal handler is
-    #     ONLY the 3rd hand (index 3), and ONLY once all 3 target hands
-    #     are hired - the farmer and first 2 hands must never be pulled
-    #     off crop duty for the goose project. Without this, testing
-    #     showed a large regression: reassigning an existing crop hand
-    #     cut real crop-tile coverage by a third, and the goose's daily
-    #     feed requirement pulled that hand back to the coop every day
-    #     for the rest of the game - a bad trade for one $50/day animal. ---
+    # --- positions: farmer first, then hands. Handlers are the LAST 2
+    #     hands - the goose handler, then the cow handler - and only
+    #     once ALL target hands are hired. The farmer and first
+    #     TARGET_CROP_HAND_COUNT hands must never be pulled off crop
+    #     duty. Testing (Day 7-10) showed a large regression when an
+    #     existing crop hand got reassigned instead: cut real crop-tile
+    #     coverage by a third, and the animal's daily feed requirement
+    #     pulled that hand back every day for the rest of the game - a
+    #     bad trade for one animal's income. ---
     positions = [me["farmer"]] + list(me["hands"])
-    have_animal_handler = len(positions) > TARGET_HAND_COUNT
-    handler_idx = TARGET_HAND_COUNT if have_animal_handler else None
+    goose_slot = TARGET_CROP_HAND_COUNT + 1
+    cow_slot = TARGET_CROP_HAND_COUNT + 2
 
-    handler_busy = False
-    if have_animal_handler:
-        handler_pos = positions[handler_idx]
-        handler_inv = inventories[handler_idx] if handler_idx < len(inventories) else {}
-        handler_action, animal_order, handler_busy = animal_handler_action(
-            handler_pos, tiles, board_size, money, shed, handler_inv
+    handler_slots_busy = {}  # slot index -> (action_list,) for busy handlers
+    goose_build_target = None
+
+    if len(positions) > goose_slot:
+        pos = positions[goose_slot]
+        inv = inventories[goose_slot] if goose_slot < len(inventories) else {}
+        action, order, busy, build_target = animal_handler_action(
+            pos, tiles, board_size, money, shed, inv,
+            animal="GOOSE", structure_kind="COOP", build_action="BUILD_COOP",
         )
-        if animal_order:
-            market.append(animal_order)
+        if order:
+            market.append(order)
+        if busy:
+            handler_slots_busy[goose_slot] = action
+        goose_build_target = build_target
+
+    if len(positions) > cow_slot:
+        pos = positions[cow_slot]
+        inv = inventories[cow_slot] if cow_slot < len(inventories) else {}
+        action, order, busy, _ = animal_handler_action(
+            pos, tiles, board_size, money, shed, inv,
+            animal="COW", structure_kind="PASTURE", build_action="BUILD_PASTURE",
+            skip_tile=goose_build_target,
+        )
+        if order:
+            market.append(order)
+        if busy:
+            handler_slots_busy[cow_slot] = action
 
     # --- coordinate remaining (non-handler-busy) units on crop tasks ---
-    crop_unit_indices = [i for i in range(len(positions)) if not (i == handler_idx and handler_busy)]
+    crop_unit_indices = [i for i in range(len(positions)) if i not in handler_slots_busy]
     crop_positions = [positions[i] for i in crop_unit_indices]
 
     seed_capacity = sum(seeds.values())
@@ -345,8 +384,8 @@ def agent(obs):
             positions[unit_i], tiles, day, remaining_seeds, assignments[list_i]
         )
 
-    if handler_busy:
-        actions[handler_idx] = handler_action
+    for slot, action in handler_slots_busy.items():
+        actions[slot] = action
 
     return {
         "farmer": actions[0],
