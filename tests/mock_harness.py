@@ -93,6 +93,13 @@ def run(turns=200, verbose=True):
                     money -= cost
                     seeds[item] = seeds.get(item, 0) + n
                     total_bought += cost
+            elif order[0] == "BUY_PRODUCT":
+                _, item, n = order
+                cost = n * 100  # fertilizer cost
+                if money >= cost:
+                    money -= cost
+                    shed[item] = shed.get(item, 0) + n
+                    total_bought += cost
             actions_taken.setdefault(order[0], 0)
             actions_taken[order[0]] += 1
 
@@ -136,6 +143,19 @@ def run(turns=200, verbose=True):
                 shed[crop] = shed.get(crop, 0) + t["yield_units"]
                 total_harvested_units += t["yield_units"]
                 tiles[fy][fx] = None  # one-time crop, simplified
+        elif act == "FERTILIZE":
+            actions_taken.setdefault("FERTILIZE", 0)
+            actions_taken["FERTILIZE"] += 1
+            t = tiles[fy][fx]
+            if isinstance(t, dict) and shed.get("FERTILIZER", 0) >= 1:
+                shed["FERTILIZER"] -= 1
+                t["fertilized_until_day"] = day + 3
+        elif act == "DIG":
+            actions_taken.setdefault("DIG", 0)
+            actions_taken["DIG"] += 1
+            t = tiles[fy][fx]
+            if isinstance(t, dict) and t.get("kind") == "WEED":
+                tiles[fy][fx] = None
         else:
             actions_taken["PASS"] += 1
 

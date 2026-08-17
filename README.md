@@ -199,20 +199,95 @@ against the real engine before being trusted.
   reserving the buffer once hand count actually exceeds the crop-hand
   target; re-confirmed the solo-farmer mock harness result returned to
   the exact $3,300 baseline.
+- **Day 13, submitted and confirmed:** real-engine seeded test came back
+  at $14,259 vs $3,482 opponent (+46.6% over the $9,731 Day 12
+  baseline) - reproduced identically across two runs. Submitted and
+  live.
+- **Day 14, melon + fertilizer + generalized sell-throttle, two more
+  real bugs found and fixed:** added melon (seed cost $80, matures day
+  10, capped at 6 yield) with a per-turn sell cap (`SELL_CAP_PER_TURN`
+  now covers milk AND melon from one table instead of a milk-only
+  special case). Hand-computed the fertilizer economics before writing
+  any code: fertilizing wheat/carrot is a net LOSS (fertilizer costs
+  $100; wheat's fertilized bonus is only +2 yield units, carrot's only
+  +1 - both worth less than $100). Fertilizer only pays off on melon,
+  where it doesn't raise the yield cap but reaches it 2 days faster -
+  worth far more than $100 across several tiles over a season. Scoped
+  fertilizer to melon only (`FERTILIZE_ELIGIBLE_CROPS = {"MELON"}`).
 
-## Status: Day 13
+  First real bug: melon seeds were bought but never actually planted -
+  `CROP_PRIORITY` always preferred wheat/carrot on any empty tile, and
+  since those stay restocked almost continuously, melon never won that
+  competition even once purchased. Fixed with `choose_crop_to_plant`,
+  giving melon a guaranteed (capped) share of tiles - but gated on
+  wheat already having a foothold (`MIN_WHEAT_TILES_BEFORE_MELON = 2`),
+  since an early version let melon claim tiles before ANY wheat
+  existed, starving cash flow for melon's whole 10-day cycle - caught
+  by the short 10-day `mock_harness.py` test going to zero revenue.
 
-Farmer + up to 5 hired hands. First 3 stay on crops (wheat, carrot); the
-4th runs the goose project, the 5th runs a cow project (pasture, buy,
-place, feed/care/harvest) - same crop-protection pattern as goose, never
-reassigns an existing crop hand. Won't buy an animal until enough wheat
-is already banked to feed it (see decisions log - this fixed a real
-starve/escape/re-buy bug that crashed a real-engine test to $1,086).
-Idle handlers hold position at their structure instead of wandering into
-crop work. Milk sells throttled to 3/turn (high glut risk); wheat/
-carrot/egg still bulk-sell, with a reserve held back for animal feed.
-Land expansion still disabled. **Not yet confirmed against the real
-engine since the fix - do not submit until verified.**
+  Second, deeper bug, exposed by melon but pre-existing since Day 6:
+  `assign_targets` picked whatever target was NEAREST across the
+  entire combined list, ignoring priority category entirely. Once
+  several wheat tiles matured close together (common with tight early
+  cycling), a solo unit kept getting pulled to nearby harvest-ready
+  tiles while farther-away tiles went unwatered long enough to turn
+  into weeds - a cascade that emptied the whole farm in the 10-day mock
+  harness test. This had always been latent; wheat/carrot's fast, even
+  cycling rarely triggered it before. Fixed by making `find_targets`
+  return separate priority tiers (water / harvest / fertilize / empty)
+  and `assign_targets` exhaust each tier before considering the next,
+  distance only breaking ties within a tier - never picks a lower-tier
+  target while a higher-tier one remains unclaimed.
+
+  Third bug, in the fertilizer-buy logic itself: after queuing a
+  `BUY_PRODUCT FERTILIZER` order, the code locally assumed the
+  purchase already landed THIS turn, immediately enabling `FERTILIZE`.
+  But per spec, player actions process BEFORE market actions each turn
+  - so a `FERTILIZE` issued the same turn as the purchase would always
+  be evaluated before the purchase resolves, and the real engine would
+  reject it. This created a loop "spending" fertilizer that was never
+  actually available - caught when a solo-farmer trace showed the
+  farmer FERTILIZE-ing the same tile 19 turns straight while everything
+  else it owned went unwatered and weeded over. Removed the same-turn
+  optimistic assumption; fertilizer only becomes usable starting the
+  turn after the purchase actually lands.
+
+  Also discovered `mock_harness.py` had never implemented `DIG` at all
+  (a pre-existing gap since Day 1) - once a weed did form, the agent's
+  unconditional "DIG if standing on a weed" got stuck in an infinite
+  loop against a tile the harness could never actually clear. Added
+  proper `DIG`/`BUY_PRODUCT` handling to the harness so this class of
+  bug is now actually testable going forward.
+
+  After all fixes: solo-farmer mock harness back to ~baseline (no more
+  deadlocks, zero DIG loops), full 30-day multi-unit run holds steady
+  at ~$21,300 with matched buy/fertilize counts and zero weeds. **As
+  always, the local number is not trusted alone - given how much
+  ground got covered this round (3 real bugs), a fresh seeded
+  real-engine comparison against the $14,259 Day 13 baseline is
+  required before this gets submitted.** Sheep (a natural next animal)
+  was deliberately deferred rather than rushed: it shares `PASTURE`
+  with cow, and the current `find_structure` only finds the FIRST
+  matching structure - two animals sharing one structure kind need a
+  way to distinguish which pasture is whose, which needs real design
+  thought, not a rushed bolt-on given how many edge cases surfaced in
+  this session already.
+
+## Status: Day 14
+
+Farmer + up to 5 hired hands. First 3 stay on crops (wheat, carrot,
+melon - melon capped at 3 tiles and gated behind wheat having 2+ tiles
+established first); 4th runs the goose project, 5th runs the cow
+project. Fertilizer is bought and applied to melon only (not
+wheat/carrot - a net loss for those, confirmed by hand-computing the
+economics, not by testing). Sell throttling now covers milk and melon
+from one generalized table. Task assignment is now priority-tiered
+(water > harvest > fertilize > plant) instead of pure-nearest, fixing a
+latent bug that could deadlock a short-staffed farm. Land expansion and
+sheep remain out of scope - land per the Day 11 regression, sheep per a
+genuine multi-pasture design gap (see decisions log). **Not yet
+confirmed against the real engine - do not submit until verified
+against the $14,259 Day 13 seeded baseline.**
 
 ## Structure
 
@@ -276,7 +351,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 13: cow + fixed starve/re-buy bug (verify vs 9731 seeded baseline first)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 14: melon + fertilizer, 3 bugs fixed (verify vs 14259 seeded baseline first)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -292,12 +367,13 @@ often, no cost to iterating.
 - [x] Day 7-10: goose project (coop, purchase, place, feed/care/harvest)
 - [x] Day 11: land expansion attempted, tested and confirmed net-negative
       against the real engine, disabled pending more crop labor
-- [ ] Day 12: scale crop hands to 4 - local sweep done, **needs seeded
-      real-engine confirmation before submitting** (see decisions log)
-- [ ] Day 13: cow + throttled milk selling - built and locally tested,
-      **needs seeded real-engine confirmation before submitting**
-- [ ] Next: fertilizer on melon, sheep, more premium crops, revisit land
-      expansion once labor genuinely scales
-- [ ] Week 3-4: react to town shop unlocks, tune sell-throttling against real
-      market data pulled from replays
+- [x] Day 12: scale crop hands to 4 - real-engine verified 9731 vs 9621, submitted
+- [x] Day 13: cow + fixed a real starve/re-buy bug - real-engine verified
+      14259 vs 9731, submitted
+- [ ] Day 14: melon + fertilizer + generalized throttle + 3 more real bugs
+      fixed - built and locally tested, **needs seeded real-engine
+      confirmation before submitting** (see decisions log)
+- [ ] Next: sheep (needs a multi-structure design first, see decisions
+      log), wool/strawberry, tune sell-throttling against real market
+      data pulled from replays, revisit land expansion once labor scales
 - [ ] Week 4-6: iterate against ladder opponents using downloaded replays/logs
