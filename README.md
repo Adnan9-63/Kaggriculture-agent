@@ -272,22 +272,43 @@ against the real engine before being trusted.
   way to distinguish which pasture is whose, which needs real design
   thought, not a rushed bolt-on given how many edge cases surfaced in
   this session already.
+- **Day 15, sheep - solved the multi-pasture design properly:** gave
+  each animal its own "home corner" of the board (goose bottom-right,
+  cow top-right, sheep bottom-left; crops already implicitly claim
+  top-left via their own forward scan order). Rewrote `find_structure`
+  into `find_structure_for_animal`, which disambiguates a PASTURE tile
+  three ways: (1) already occupied by the target animal - unambiguous,
+  return it; (2) occupied by a DIFFERENT animal from an explicit
+  `other_animals` exclusion list - unambiguous, skip it; (3) built but
+  still empty - pick whichever candidate is nearest my home corner,
+  which reliably tracks the one I built since I always build nearest my
+  own corner in the first place. Also generalized the old single-
+  `skip_tile` collision guard (Day 13) into a list (`skip_tiles`) so
+  three handlers building in the same turn never race for the same
+  spot, not just two. Verified with a coordinate-corrected unit test
+  (caught my own `tiles[y][x]` mix-up while writing it - x and y really
+  do bite back) confirming all three animals get fed independently by
+  the right handler, and confirmed via `full_harness.py` that exactly 3
+  animals get bought total (not 6+ from an escape loop) and both
+  pastures get built once each with no collision. Extended the harness
+  for sheep/wool/`SHEEP` cost. Solo-farmer mock harness result
+  unchanged from Day 14 baseline (2,975) - no regression.
 
-## Status: Day 14
+## Status: Day 15
 
-Farmer + up to 5 hired hands. First 3 stay on crops (wheat, carrot,
-melon - melon capped at 3 tiles and gated behind wheat having 2+ tiles
-established first); 4th runs the goose project, 5th runs the cow
-project. Fertilizer is bought and applied to melon only (not
-wheat/carrot - a net loss for those, confirmed by hand-computing the
-economics, not by testing). Sell throttling now covers milk and melon
-from one generalized table. Task assignment is now priority-tiered
-(water > harvest > fertilize > plant) instead of pure-nearest, fixing a
-latent bug that could deadlock a short-staffed farm. Land expansion and
-sheep remain out of scope - land per the Day 11 regression, sheep per a
-genuine multi-pasture design gap (see decisions log). **Not yet
-confirmed against the real engine - do not submit until verified
-against the $14,259 Day 13 seeded baseline.**
+Farmer + up to 6 hired hands. First 3 stay on crops (wheat, carrot,
+melon); the last 3 each run one animal project - goose (coop), cow
+(pasture), sheep (pasture). Cow and sheep share the PASTURE structure
+kind but never collide: each animal gets its own "home corner" of the
+board to build near, and structure lookups disambiguate by which animal
+actually occupies a tile (or, before that, by which corner a candidate
+tile is nearest to) - see `find_structure_for_animal` and decisions log.
+Sell throttling covers milk, melon, and wool from one generalized table.
+Fertilizer stays melon-only (wheat/carrot fertilizing is a net loss per
+the Day 14 math). Land expansion remains disabled pending the Day 11
+regression being revisited. **Not yet confirmed against the real
+engine - do not submit until verified against the $18,071 Day 14 seeded
+baseline.**
 
 ## Structure
 
@@ -351,7 +372,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 14: melon + fertilizer, 3 bugs fixed (verify vs 14259 seeded baseline first)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 15: sheep, multi-pasture disambiguation (verify vs 18071 seeded baseline first)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -370,10 +391,11 @@ often, no cost to iterating.
 - [x] Day 12: scale crop hands to 4 - real-engine verified 9731 vs 9621, submitted
 - [x] Day 13: cow + fixed a real starve/re-buy bug - real-engine verified
       14259 vs 9731, submitted
-- [ ] Day 14: melon + fertilizer + generalized throttle + 3 more real bugs
-      fixed - built and locally tested, **needs seeded real-engine
-      confirmation before submitting** (see decisions log)
-- [ ] Next: sheep (needs a multi-structure design first, see decisions
-      log), wool/strawberry, tune sell-throttling against real market
-      data pulled from replays, revisit land expansion once labor scales
+- [x] Day 14: melon + fertilizer + generalized throttle + 3 real bugs
+      fixed - real-engine verified 18071 vs 14259, submitted
+- [ ] Day 15: sheep, multi-pasture disambiguation solved - built and
+      locally tested, **needs seeded real-engine confirmation before
+      submitting** (see decisions log)
+- [ ] Next: strawberry, tune sell-throttling against real market data
+      pulled from replays, revisit land expansion once labor scales
 - [ ] Week 4-6: iterate against ladder opponents using downloaded replays/logs

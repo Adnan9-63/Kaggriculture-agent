@@ -14,9 +14,9 @@ from main import agent  # noqa: E402
 
 BOARD_SIZE = 10
 STARTING_MONEY = 3000
-PRICES = {"WHEAT": 25, "CARROT": 35, "EGG": 50, "MILK": 160, "MELON": 250, "FERTILIZER": 100}
+PRICES = {"WHEAT": 25, "CARROT": 35, "EGG": 50, "MILK": 160, "MELON": 250, "FERTILIZER": 100, "WOOL": 200}
 SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80}
-ANIMAL_COST = {"GOOSE": 300, "COW": 400}
+ANIMAL_COST = {"GOOSE": 300, "COW": 400, "SHEEP": 500}
 MATURITY = {"WHEAT": 4, "CARROT": 3, "MELON": 10}
 CAP = {"WHEAT": 4, "CARROT": 3, "MELON": 6}
 HIRE_COST_SEQUENCE = [1, 1, 2, 3, 5, 8, 13, 21, 34]
@@ -181,7 +181,7 @@ def run(turns=720, verbose=True, label=""):
                     shed[crop] = shed.get(crop, 0) + tile["yield_units"]
                     tiles[y][x] = None
                 elif isinstance(tile, dict) and tile.get("kind") in ("COOP", "PASTURE") and tile.get("yield_units", 0) > 0:
-                    product = {"GOOSE": "EGG", "COW": "MILK"}.get(tile.get("animal"), "EGG")
+                    product = {"GOOSE": "EGG", "COW": "MILK", "SHEEP": "WOOL"}.get(tile.get("animal"), "EGG")
                     shed[product] = shed.get(product, 0) + tile["yield_units"]
                     tile["yield_units"] = 0
                 else:

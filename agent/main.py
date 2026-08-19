@@ -33,7 +33,7 @@ HAND_CASH_RESERVE = 300    # cash kept in reserve before hiring a hand
 TARGET_CROP_HAND_COUNT = 3   # farmer + these 3 = 4 crop workers, tested as the
                               # sweet spot for the 25-tile NW quadrant (see
                               # Day 12 decisions log)
-TARGET_HAND_COUNT = TARGET_CROP_HAND_COUNT + 2   # +1 goose handler, +1 cow handler
+TARGET_HAND_COUNT = TARGET_CROP_HAND_COUNT + 3   # +1 each for goose, cow, sheep
 
 CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80}
 # "Time to Max Yield" for one-time crops, unfertilized (from the spec
@@ -90,14 +90,30 @@ FERTILIZE_MAX_AGE = 7
 SELL_CAP_PER_TURN = {
     "MILK": 3,
     "MELON": 2,
+    "WOOL": 2,
 }
 
 # Fibonacci-ish hire cost sequence, indexed by hires_today (0-indexed).
 # Matches farmHandCostMult(=1) * fib(n), fib starting 1,1,2,3,5,8,...
 HIRE_COST_SEQUENCE = [1, 1, 2, 3, 5, 8, 13, 21, 34]
 
-ANIMAL_COST = {"GOOSE": 300, "COW": 400}
+ANIMAL_COST = {"GOOSE": 300, "COW": 400, "SHEEP": 500}
 ANIMAL_CASH_RESERVE = 300  # keep this much in reserve before buying an animal
+
+# Each animal handler gets its own "home corner" of the NW quadrant so
+# structure searches for different animals never spatially collide -
+# needed because cow and sheep both use PASTURE, and without separated
+# search regions there'd be no reliable way to tell "my pasture" from
+# "the other animal's pasture" before an animal is actually placed on
+# it (see find_structure_for_animal). Crops implicitly claim top-left
+# via their own forward (0,0)-first scan order, so (0,0) is avoided
+# here. Corners chosen to spread the three animals across the other
+# three corners of the 5x5 NW quadrant (board indices 0-4).
+ANIMAL_CORNER = {
+    "GOOSE": (4, 4),  # bottom-right
+    "COW": (4, 0),    # top-right
+    "SHEEP": (0, 4),  # bottom-left
+}
 
 TARGET_ANIMAL_HAND_COUNT = 2  # 1 for goose, 1 for cow - added on top of crop hands
 
@@ -180,43 +196,72 @@ def nearest(pos, candidates):
     return min(candidates, key=lambda c: abs(c[0] - pos[0]) + abs(c[1] - pos[1]))
 
 
-def find_structure(tiles, board_size, kind):
-    """Return (x, y) of the first structure tile of the given kind
-    (COOP or PASTURE) found, or None."""
+def find_structure_for_animal(tiles, board_size, kind, target_animal, other_animals, my_corner):
+    """Find the structure tile of the given kind that belongs to
+    target_animal. Needed because COW and SHEEP both use PASTURE - two
+    separate pasture tiles can exist on the board at once, and a naive
+    "first one found" search can't tell them apart. Disambiguation:
+      1. A structure already holding target_animal is unambiguously
+         mine - return it immediately.
+      2. A structure holding a DIFFERENT animal from `other_animals`
+         (e.g. cow's search skipping a pasture that already has a
+         sheep on it) is unambiguously NOT mine - skip it.
+      3. Among structures with no animal placed yet (built but empty,
+         or genuinely nobody's), pick whichever is nearest my assigned
+         "home corner" - since I always build nearest my own corner in
+         the first place (see find_nearest_empty_tile), this reliably
+         tracks the one I built even before an animal is on it."""
+    candidates = []
     for y in range(board_size):
         for x in range(board_size):
             tile = tiles[y][x]
             if isinstance(tile, dict) and tile.get("kind") == kind:
-                return (x, y)
-    return None
+                occupant = tile.get("animal")
+                if occupant == target_animal:
+                    return (x, y)
+                if occupant in other_animals:
+                    continue
+                candidates.append((x, y))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda p: abs(p[0] - my_corner[0]) + abs(p[1] - my_corner[1]))
 
 
-def find_empty_tile_from_corner(tiles, board_size, skip=None):
-    """Scan for an empty tile starting from the bottom-right corner -
-    crop planting scans from top-left, so this reduces (but doesn't
-    fully eliminate) projects racing for the same tile. `skip` excludes
-    a tile already claimed by another project this same turn (e.g. the
-    goose's coop, when the cow handler is also hunting for space)."""
-    for y in range(board_size - 1, -1, -1):
-        for x in range(board_size - 1, -1, -1):
-            if tiles[y][x] is None and (x, y) != skip:
-                return (x, y)
-    return None
+def find_nearest_empty_tile(tiles, board_size, corner, skip=None):
+    """Find the empty tile nearest to `corner`. Each animal handler gets
+    its own corner (goose/cow/sheep each different, crops implicitly
+    prefer top-left via their own forward scan order) so builds
+    naturally land in separated areas instead of colliding. `skip`
+    excludes a tile another handler already claimed THIS turn."""
+    best = None
+    best_dist = None
+    for y in range(board_size):
+        for x in range(board_size):
+            if tiles[y][x] is None and (x, y) != skip and (skip is None or (x, y) not in skip):
+                d = abs(x - corner[0]) + abs(y - corner[1])
+                if best_dist is None or d < best_dist:
+                    best_dist = d
+                    best = (x, y)
+    return best
 
 
 def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
-                           animal, structure_kind, build_action, skip_tile=None):
+                           animal, structure_kind, build_action, my_corner,
+                           other_animals=(), skip_tiles=None):
     """Decide a dedicated handler's action for an animal project this
-    turn (goose/coop or cow/pasture - same shape either way). Returns
-    (action_list, market_order_or_None, is_busy, build_target_or_None).
-    build_target is only set while still hunting for a spot to build on
-    (before the structure exists) - the caller passes it as skip_tile to
-    a second handler running the same turn, so two handlers never race
-    to build on the exact same empty tile before either action lands."""
-    structure_pos = find_structure(tiles, board_size, structure_kind)
+    turn (goose/coop, cow/pasture, or sheep/pasture - same shape either
+    way). Returns (action_list, market_order_or_None, is_busy,
+    build_target_or_None). build_target is only set while still hunting
+    for a spot to build on (before the structure exists) - the caller
+    collects these across handlers running the same turn and passes
+    them as skip_tiles to the next one, so multiple handlers never race
+    to build on the exact same empty tile before any action lands."""
+    structure_pos = find_structure_for_animal(
+        tiles, board_size, structure_kind, animal, other_animals, my_corner
+    )
 
     if structure_pos is None:
-        target = find_empty_tile_from_corner(tiles, board_size, skip=skip_tile)
+        target = find_nearest_empty_tile(tiles, board_size, my_corner, skip=skip_tiles)
         if target is None:
             return (["PASS"], None, True, None)
         if tuple(pos) == target:
@@ -398,12 +443,14 @@ def count_placed_animals(tiles, board_size):
     return count
 
 
-def hold_position_action(pos, tiles, board_size, structure_kind):
+def hold_position_action(pos, tiles, board_size, structure_kind, animal, other_animals, my_corner):
     """An idle handler's action when its animal doesn't currently need
     attention: stay at (or return to) its structure rather than
     wandering off, so it's instantly available the moment feeding is
     needed again instead of risking a long trip back."""
-    structure_pos = find_structure(tiles, board_size, structure_kind)
+    structure_pos = find_structure_for_animal(
+        tiles, board_size, structure_kind, animal, other_animals, my_corner
+    )
     if structure_pos is None or tuple(pos) == structure_pos:
         return ["PASS"]
     move = step_toward(pos, structure_pos)
@@ -525,18 +572,19 @@ def agent(obs):
                 market.append(["BUY_LAND"])
                 money -= land_cost
 
-    # --- positions: farmer first, then hands. Handlers are the LAST 2
-    #     hands - the goose handler, then the cow handler - and only
-    #     once ALL target hands are hired. The farmer and first
-    #     TARGET_CROP_HAND_COUNT hands must never be pulled off crop
-    #     duty. Testing (Day 7-10) showed a large regression when an
-    #     existing crop hand got reassigned instead: cut real crop-tile
-    #     coverage by a third, and the animal's daily feed requirement
-    #     pulled that hand back every day for the rest of the game - a
-    #     bad trade for one animal's income. ---
+    # --- positions: farmer first, then hands. Handlers are the LAST 3
+    #     hands - goose, then cow, then sheep - and only once ALL target
+    #     hands are hired. The farmer and first TARGET_CROP_HAND_COUNT
+    #     hands must never be pulled off crop duty. Testing (Day 7-10)
+    #     showed a large regression when an existing crop hand got
+    #     reassigned instead: cut real crop-tile coverage by a third,
+    #     and the animal's daily feed requirement pulled that hand back
+    #     every day for the rest of the game - a bad trade for one
+    #     animal's income. ---
     positions = [me["farmer"]] + list(me["hands"])
     goose_slot = TARGET_CROP_HAND_COUNT + 1
     cow_slot = TARGET_CROP_HAND_COUNT + 2
+    sheep_slot = TARGET_CROP_HAND_COUNT + 3
 
     handler_slots = {}  # slot index -> action_list, for ALL handler slots
                          # (busy or idle) - handlers NEVER do crop work,
@@ -549,37 +597,38 @@ def agent(obs):
                          # handler instead holds position at its
                          # structure, trading a little unused labor for
                          # guaranteed same-turn feed response.
-    goose_build_target = None
+    build_targets_this_turn = []  # tiles already claimed by an earlier
+                                   # handler this turn, so a later one
+                                   # never races to build on the same spot
 
-    if len(positions) > goose_slot:
-        pos = positions[goose_slot]
-        inv = inventories[goose_slot] if goose_slot < len(inventories) else {}
+    ANIMAL_HANDLERS = [
+        (goose_slot, "GOOSE", "COOP", "BUILD_COOP", ()),
+        (cow_slot, "COW", "PASTURE", "BUILD_PASTURE", ("SHEEP",)),
+        (sheep_slot, "SHEEP", "PASTURE", "BUILD_PASTURE", ("COW",)),
+    ]
+
+    for slot, animal, structure_kind, build_action, other_animals in ANIMAL_HANDLERS:
+        if len(positions) <= slot:
+            continue
+        pos = positions[slot]
+        inv = inventories[slot] if slot < len(inventories) else {}
         action, order, busy, build_target = animal_handler_action(
             pos, tiles, board_size, money, shed, inv,
-            animal="GOOSE", structure_kind="COOP", build_action="BUILD_COOP",
+            animal=animal, structure_kind=structure_kind, build_action=build_action,
+            my_corner=ANIMAL_CORNER[animal], other_animals=other_animals,
+            skip_tiles=build_targets_this_turn,
         )
         if order:
             market.append(order)
-        goose_build_target = build_target
+        if build_target:
+            build_targets_this_turn.append(build_target)
         if busy:
-            handler_slots[goose_slot] = action
+            handler_slots[slot] = action
         else:
-            handler_slots[goose_slot] = hold_position_action(pos, tiles, board_size, "COOP")
-
-    if len(positions) > cow_slot:
-        pos = positions[cow_slot]
-        inv = inventories[cow_slot] if cow_slot < len(inventories) else {}
-        action, order, busy, _ = animal_handler_action(
-            pos, tiles, board_size, money, shed, inv,
-            animal="COW", structure_kind="PASTURE", build_action="BUILD_PASTURE",
-            skip_tile=goose_build_target,
-        )
-        if order:
-            market.append(order)
-        if busy:
-            handler_slots[cow_slot] = action
-        else:
-            handler_slots[cow_slot] = hold_position_action(pos, tiles, board_size, "PASTURE")
+            handler_slots[slot] = hold_position_action(
+                pos, tiles, board_size, structure_kind,
+                animal, other_animals, ANIMAL_CORNER[animal],
+            )
 
     # --- coordinate remaining (non-handler-busy) units on crop tasks ---
     crop_unit_indices = [i for i in range(len(positions)) if i not in handler_slots]
