@@ -30,25 +30,10 @@ crops, throttled selling.
 BOARD_SIZE = 10
 SEED_BUFFER = 200          # cash kept in reserve before buying seed
 HAND_CASH_RESERVE = 300    # cash kept in reserve before hiring a hand
-
-# Crop-hand target now SCALES with owned land instead of being fixed at
-# 3. Day 12 tested 3 crop hands (farmer+3=4 workers) as the sweet spot
-# for exactly ONE 25-tile quadrant - that ratio (1 worker per ~6 tiles)
-# is the thing that generalizes, not the flat number 3. As land expands,
-# crop_hand_target(unlocked_quadrants) below scales proportionally, so
-# a 2nd quadrant gets a 2nd batch of crop hands instead of the same 3
-# hands trying to cover 2x the space (which is exactly why the Day 11
-# land-expansion attempt lost money - land grew, labor didn't).
-CROP_HANDS_PER_QUADRANT = 3
-ANIMAL_HANDLER_COUNT = 3   # goose, cow, sheep - constant regardless of land
-
-
-def crop_hand_target(unlocked_quadrants):
-    return CROP_HANDS_PER_QUADRANT * max(1, len(unlocked_quadrants))
-
-
-def total_hand_target(unlocked_quadrants):
-    return crop_hand_target(unlocked_quadrants) + ANIMAL_HANDLER_COUNT
+TARGET_CROP_HAND_COUNT = 3   # farmer + these 3 = 4 crop workers, tested as the
+                              # sweet spot for the 25-tile NW quadrant (see
+                              # Day 12 decisions log)
+TARGET_HAND_COUNT = TARGET_CROP_HAND_COUNT + 3   # +1 each for goose, cow, sheep
 
 CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80}
 # "Time to Max Yield" for one-time crops, unfertilized (from the spec
@@ -151,30 +136,20 @@ WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE = 5
 # Costs increase for each quadrant beyond the starting NW one - per spec:
 # "$1k, $2k, $4k".
 #
-# RE-ENABLED (Day 16) with a real fix this time, not just a smaller cap.
-# The Day 11 attempt lost money against the real engine even capped at
-# just 1 extra quadrant, because crop-hand count never scaled with the
-# extra land - more tiles, same labor, so travel time and weed-cleanup
-# load ate the gains. This time land purchases are gated on labor
-# already being scaled to match CURRENT land (crop_hand_target) before
-# the next quadrant is allowed - each purchase must be "earned" by
-# labor that's already proven it can keep up, not funded speculatively.
-#
-# Capped at ONE extra quadrant (not all three), per a local sweep across
-# CROP_HANDS_PER_QUADRANT (3-5) and land caps (1-3 quadrants):
-#   ratio=3, 1 quadrant  -> $26,790 (best - beats the $24,465 no-land
-#                            baseline)
-#   ratio=3, 2-3 quadrants -> $20,910 (worse than no land at all)
-#   ratio=4/5, any cap   -> flat, ~$22,700-23,900 (staffing cost itself
-#                            becomes the bottleneck before land does)
-# Diminishing/negative returns kick in fast beyond 1 extra quadrant,
-# most likely from the daily re-hiring cost (Fibonacci-scaled) growing
-# faster than the marginal land value once headcount gets large. As
-# always, this is a LOCAL, flat-price result - Day 11 already showed
-# this exact local model overestimates land's value (misses weed-spawn
-# scaling and real travel cost), so real-engine verification matters
-# even more here than usual before trusting it.
-LAND_COST_SEQUENCE = [1000]
+# DISABLED for now (empty list). Tested capped at 1 extra quadrant and it
+# looked like a net win in tests/full_harness.py (14,230 vs 13,535 with
+# no land) - but that local simulator uses flat pricing and doesn't spawn
+# weeds at all. Against the REAL engine (tests/diagnostic_test.py, same
+# fixed seed as the no-land goose version), it was a real regression:
+# $7,090 vs $9,621, reproduced identically twice. Real cause, most likely:
+# more owned tiles means more weed-spawn opportunities per day (each
+# empty tile spawns a weed independently), and the NE quadrant is
+# genuinely farther from the shed hub, so units spend more time
+# traveling and less time watering/harvesting - exactly the labor
+# bottleneck the strategy doc warned about, which my local simulator
+# couldn't see. Revisit only once crop-worker count scales up enough to
+# actually absorb the extra distance and weed-cleanup load.
+LAND_COST_SEQUENCE = []
 LAND_CASH_RESERVE = 500
 
 
@@ -495,8 +470,6 @@ def agent(obs):
     seeds = dict(private["seeds"])
     shed = private["shed"]
     inventories = private.get("inventories", [])
-    unlocked_quadrants = me.get("unlocked_quadrants", ["NW"])
-    crop_target = crop_hand_target(unlocked_quadrants)
 
     market = []
 
@@ -520,7 +493,7 @@ def agent(obs):
     # handler - no point withholding wheat for an animal that has no
     # chance of being bought yet (e.g. solo farmer, early game).
     animal_count = count_placed_animals(tiles, board_size)
-    have_handler_capacity = len(me.get("hands", [])) > crop_target
+    have_handler_capacity = len(me.get("hands", [])) > TARGET_CROP_HAND_COUNT
     wheat_reserve = WHEAT_FEED_RESERVE_PER_ANIMAL * animal_count
     if have_handler_capacity:
         wheat_reserve += WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE
@@ -575,16 +548,11 @@ def agent(obs):
             market.append(["BUY_PRODUCT", "FERTILIZER", 1])
             money -= FERTILIZER_COST
 
-    # --- hire hands at the start of the day if we can afford it. Target
-    #     scales with owned land (crop_target = crop_hand_target(...))
-    #     instead of a fixed number, so a farm with 2 quadrants hires
-    #     enough crop hands for 2 quadrants' worth of work, not the same
-    #     count that only ever matched a single quadrant. ---
+    # --- hire hands at the start of the day if we can afford it ---
     hires_today = me.get("hires_today", 0)
     current_hands = len(me.get("hands", []))
-    hand_target = crop_target + ANIMAL_HANDLER_COUNT
     if hour == 0:
-        while current_hands < hand_target and hires_today < len(HIRE_COST_SEQUENCE):
+        while current_hands < TARGET_HAND_COUNT and hires_today < len(HIRE_COST_SEQUENCE):
             cost = HIRE_COST_SEQUENCE[hires_today]
             if money - HAND_CASH_RESERVE < cost:
                 break
@@ -593,12 +561,10 @@ def agent(obs):
             hires_today += 1
             current_hands += 1
 
-    # --- buy the NEXT quadrant only once labor is already fully scaled
-    #     to match CURRENT land - each purchase must be "earned" by
-    #     labor that's already proven it can keep up with what we have,
-    #     not funded speculatively ahead of it. Day 11 lost money buying
-    #     land without this gate; see decisions log. ---
-    if hour == 0 and current_hands >= hand_target:
+    # --- buy land once fully staffed and cash allows - expanding before
+    #     labor exists just leaves new tiles idle ---
+    unlocked_quadrants = me.get("unlocked_quadrants", ["NW"])
+    if hour == 0 and current_hands >= TARGET_HAND_COUNT:
         land_idx = len(unlocked_quadrants) - 1
         if 0 <= land_idx < len(LAND_COST_SEQUENCE):
             land_cost = LAND_COST_SEQUENCE[land_idx]
@@ -608,33 +574,17 @@ def agent(obs):
 
     # --- positions: farmer first, then hands. Handlers are the LAST 3
     #     hands - goose, then cow, then sheep - and only once ALL target
-    #     hands are hired. The farmer and first crop_target hands must
-    #     never be pulled off crop duty. Testing (Day 7-10) showed a
-    #     large regression when an existing crop hand got reassigned
-    #     instead: cut real crop-tile coverage by a third, and the
-    #     animal's daily feed requirement pulled that hand back every
-    #     day for the rest of the game - a bad trade for one animal's
-    #     income. ---
+    #     hands are hired. The farmer and first TARGET_CROP_HAND_COUNT
+    #     hands must never be pulled off crop duty. Testing (Day 7-10)
+    #     showed a large regression when an existing crop hand got
+    #     reassigned instead: cut real crop-tile coverage by a third,
+    #     and the animal's daily feed requirement pulled that hand back
+    #     every day for the rest of the game - a bad trade for one
+    #     animal's income. ---
     positions = [me["farmer"]] + list(me["hands"])
-    # Handler slots are the LAST 3 hands (by position, not a growing
-    # offset from the front) - stable even as crop_target grows when
-    # land expands. An offset-from-front scheme (crop_target+1/2/3)
-    # reinterprets whichever hand USED to be "the goose handler" as a
-    # plain crop hand the instant crop_target grows, orphaning its
-    # animal mid-game and triggering the exact starve/re-buy pattern
-    # from Day 13 - confirmed by testing: BUY_ANIMAL fired 6 times in
-    # one 30-day run instead of 3, with an unplaced sheep stuck in the
-    # shed at the end. Only assign these roles once FULLY staffed for
-    # current land (crop_target crop hands + all 3 animal handlers) -
-    # otherwise a hand still needed for crop duty could get misread as
-    # a spare animal handler mid-transition.
-    fully_staffed = len(positions) >= crop_target + ANIMAL_HANDLER_COUNT + 1
-    if fully_staffed:
-        goose_slot = len(positions) - 3
-        cow_slot = len(positions) - 2
-        sheep_slot = len(positions) - 1
-    else:
-        goose_slot = cow_slot = sheep_slot = None
+    goose_slot = TARGET_CROP_HAND_COUNT + 1
+    cow_slot = TARGET_CROP_HAND_COUNT + 2
+    sheep_slot = TARGET_CROP_HAND_COUNT + 3
 
     handler_slots = {}  # slot index -> action_list, for ALL handler slots
                          # (busy or idle) - handlers NEVER do crop work,
@@ -658,7 +608,7 @@ def agent(obs):
     ]
 
     for slot, animal, structure_kind, build_action, other_animals in ANIMAL_HANDLERS:
-        if slot is None or len(positions) <= slot:
+        if len(positions) <= slot:
             continue
         pos = positions[slot]
         inv = inventories[slot] if slot < len(inventories) else {}

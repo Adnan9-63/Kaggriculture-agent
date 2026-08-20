@@ -280,26 +280,9 @@ def run(turns=720, verbose=True, label=""):
                                 t["consecutive_unfed"] = 0
                         t["fed_today"] = False
                         t["cared_today"] = False
-            # All units (farmer AND hands) drop inventory into the shed
-            # at end of day, per spec - overflow past shedCapacity (100)
-            # is discarded. Previously this just discarded ALL hand
-            # inventory unconditionally, which silently destroyed any
-            # animal picked up but not yet placed by day's end - a real
-            # test-harness bug that made repeated BUY_ANIMAL purchases
-            # look necessary when they likely weren't (see Day 16
-            # decisions log).
-            SHED_CAPACITY = 100
-            for inv in inventories:
-                for item, n in inv.items():
-                    if n <= 0:
-                        continue
-                    room = max(0, SHED_CAPACITY - sum(shed.values()))
-                    add = min(n, room)
-                    if add > 0:
-                        shed[item] = shed.get(item, 0) + add
+            # hands disappear at end of day, drop inventory (simplified: discard)
             hands = []
-            inventories = [{}]  # farmer's own inventory also empties into
-                                 # shed at day end, then starts fresh
+            inventories = [inventories[0]]
 
     if verbose:
         print(f"\n=== {label} ===")
