@@ -294,21 +294,83 @@ against the real engine before being trusted.
   for sheep/wool/`SHEEP` cost. Solo-farmer mock harness result
   unchanged from Day 14 baseline (2,975) - no regression.
 
-## Status: Day 15
+- **Day 16, land expansion revisited with proportional labor - two more
+  real bugs found and fixed, one strong local result:** given a large
+  leaderboard gap (our best submission 669.7 vs public top scores in
+  the 2,850-3,150 range), land was the obvious biggest untapped lever -
+  we use 25 of 100 tiles. Made `TARGET_CROP_HAND_COUNT` dynamic
+  (`crop_hand_target(unlocked_quadrants) = CROP_HANDS_PER_QUADRANT *
+  quadrant_count`) instead of a fixed 3, so crop-hand count scales with
+  land instead of staying flat like the Day 11 attempt that lost money.
 
-Farmer + up to 6 hired hands. First 3 stay on crops (wheat, carrot,
-melon); the last 3 each run one animal project - goose (coop), cow
-(pasture), sheep (pasture). Cow and sheep share the PASTURE structure
-kind but never collide: each animal gets its own "home corner" of the
-board to build near, and structure lookups disambiguate by which animal
-actually occupies a tile (or, before that, by which corner a candidate
-tile is nearest to) - see `find_structure_for_animal` and decisions log.
-Sell throttling covers milk, melon, and wool from one generalized table.
-Fertilizer stays melon-only (wheat/carrot fertilizing is a net loss per
-the Day 14 math). Land expansion remains disabled pending the Day 11
-regression being revisited. **Not yet confirmed against the real
-engine - do not submit until verified against the $18,071 Day 14 seeded
-baseline.**
+  First bug: handler slots were computed as `crop_target + 1/2/3` - a
+  growing offset from the FRONT of the hand list. The instant
+  crop_target grew (land expanding), whichever hand USED to be "the
+  goose handler" got silently reinterpreted as a plain crop hand,
+  orphaning its animal mid-game. Confirmed via trace: `BUY_ANIMAL`
+  fired 6 times in one run instead of 3, with animals escaping right
+  around a land-purchase event. Fixed by indexing handler slots from
+  the END of the hand list instead (`len(positions)-3/-2/-1`) - stable
+  regardless of how many crop hands sit in front of them, only
+  assigned once FULLY staffed for current land.
+
+  Second, this one turned out to be a TEST-HARNESS bug, not an agent
+  bug: after the first fix, `BUY_ANIMAL` was STILL firing repeatedly.
+  Traced it to `full_harness.py` silently discarding ALL hand inventory
+  at day's end instead of depositing it into the shed like the real
+  spec requires ("all items in all inventory will be added to shed
+  inventory"). An animal picked up but not placed before the day ended
+  was just deleted by the simulator, making the agent correctly
+  re-detect "no animal anywhere" and re-buy - the agent's own logic was
+  fine the whole time. Fixed the harness to properly deposit every
+  unit's inventory into the shed (capped at shedCapacity=100) at day
+  end. After both fixes: `BUY_ANIMAL` fires exactly 3 times, matching
+  goose/cow/sheep, no more phantom re-buys.
+
+  With mechanics confirmed correct, ran a local sweep across
+  `CROP_HANDS_PER_QUADRANT` (3-5) and land cap (1-3 extra quadrants):
+  only ratio=3 with exactly 1 extra quadrant beat the no-land baseline
+  ($26,790 vs $24,465); 2-3 quadrants dropped to $20,910 regardless of
+  ratio, and higher ratios flattened out entirely - daily Fibonacci
+  re-hiring cost becomes the bottleneck before land does. Locked in
+  `LAND_COST_SEQUENCE = [1000]` (1 extra quadrant only) with
+  `CROP_HANDS_PER_QUADRANT = 3`. **Given Day 11's precedent - this
+  exact local flat-price model already overestimated land's value once
+  before by missing weed-spawn scaling and real travel cost - treat
+  this local win with real caution. A seeded real-engine comparison
+  against the $21,315 Day 15 baseline is required, more so than usual,
+  before this gets submitted.**
+
+- **Day 16, land expansion confirmed against the real engine, and
+  reverted:** the seeded diagnostic came back at $4,857 vs the $21,315
+  no-land baseline - a ~77% collapse, not a marginal loss. The `hands`
+  column crashed to 0 repeatedly (days 3-9 especially): the daily
+  Fibonacci re-hiring cost for 9 hands (~$88/day) plus the $1,000 land
+  purchase plus more seed spending outran real income far worse than
+  the flat-price local model predicted, almost certainly because real
+  market prices crash under real oversupply in a way no local
+  simulator here can see. This is land expansion's SECOND real-engine
+  failure despite two different local models (Day 11's and Day 16's)
+  both saying it should work. Reverted `LAND_COST_SEQUENCE` back to
+  empty. Treating this as a real, settled conclusion for now rather
+  than something to keep re-attempting: the current architecture can't
+  make land expansion profitable, and a third attempt would need a
+  fundamentally different approach (much more gradual scaling, or real
+  price-response data pulled from replays) rather than another
+  local-sweep-then-hope. Confirmed clean revert: `full_harness.py`
+  back to exactly $24,465 with `Quadrants owned: ['NW']` only,
+  `BUY_ANIMAL: 3` matching Day 15's clean numbers.
+
+## Status: Day 16
+
+Same as Day 15 (farmer + up to 6 hired hands - 3 crop, goose, cow,
+sheep), with the dynamic `crop_hand_target()` infrastructure now in
+place but land expansion disabled again after a confirmed severe
+real-engine regression (see decisions log). Sheep, melon, fertilizer,
+and the generalized sell-throttle table from Days 14-15 remain intact
+and are the last real-engine-confirmed economics ($21,315 vs $3,477).
+Land expansion is considered a settled dead end for now, not something
+to keep retrying without a fundamentally different approach.
 
 ## Structure
 
@@ -372,7 +434,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 15: sheep, multi-pasture disambiguation (verify vs 18071 seeded baseline first)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 16: land expansion reverted (confirmed regression), Day 15 economics intact"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -393,9 +455,15 @@ often, no cost to iterating.
       14259 vs 9731, submitted
 - [x] Day 14: melon + fertilizer + generalized throttle + 3 real bugs
       fixed - real-engine verified 18071 vs 14259, submitted
-- [ ] Day 15: sheep, multi-pasture disambiguation solved - built and
-      locally tested, **needs seeded real-engine confirmation before
-      submitting** (see decisions log)
+- [x] Day 15: sheep, multi-pasture disambiguation solved - real-engine
+      verified 21315 vs 18071, submitted (rating jumped to 669.7,
+      clear separation from the ~330-390 pack)
+- [x] Day 16: land expansion redux with proportional labor scaling -
+      confirmed a SECOND real-engine regression despite a promising
+      local sweep (4857 vs 21315, -77%). Reverted; land expansion now
+      considered a settled dead end pending a fundamentally different
+      approach. Day 15 economics resubmitted unchanged.
 - [ ] Next: strawberry, tune sell-throttling against real market data
-      pulled from replays, revisit land expansion once labor scales
+      pulled from replays, study public high-scoring notebooks for
+      strategic gaps (leaderboard top scores ~2,850-3,150 vs our 669.7)
 - [ ] Week 4-6: iterate against ladder opponents using downloaded replays/logs
