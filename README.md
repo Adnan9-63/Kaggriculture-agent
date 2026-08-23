@@ -374,6 +374,20 @@ against the real engine before being trusted.
   this at all**, since price never actually varies there - only the
   isolated unit tests prove the logic branches work; the real test is
   the real engine, where prices genuinely move.
+- **Day 17, real-engine regression caught and fixed:** the seeded
+  diagnostic came back at $19,564 vs the $21,315 baseline (-8.2%,
+  reproduced identically twice) - the "sell more when price is
+  healthy" half of the throttle (doubling `base_cap` above
+  `PRICE_RATIO_HEALTHY`) was the suspect. For the steepest glut-risk
+  goods (melon above_target 3.60, wool 3.20), selling MORE right when
+  price recovers pushes it straight back into crash territory - the
+  original flat, conservative cap was already doing its job for those,
+  and the "sell more" idea undid that safety margin. Removed the
+  doubling entirely; `dynamic_sell_quantity` now only ever throttles
+  DOWN (on a crashed price), never up. Re-verified with unit tests
+  (throttled goods now sell at exactly their original flat cap unless
+  price has crashed). **Needs a fresh seeded real-engine run to confirm
+  this actually recovers - not yet re-tested since the fix.**
 - **Day 18-19, strawberry:** a 4th crop, but structurally different
   from wheat/carrot/melon - it's ONGOING (like tomato), producing
   repeatedly at fixed ages (10, 12, 14, 16) instead of a single harvest

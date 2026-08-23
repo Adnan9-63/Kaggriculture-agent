@@ -161,9 +161,19 @@ def dynamic_sell_quantity(available, current_price, item, base_cap=None):
     normal per-turn ceiling for throttled goods (None means normally
     unlimited, i.e. bulk-sell staples). Below PRICE_RATIO_CRASHED, sell
     much less regardless of category - even a "safe" staple grinds its
-    own price further down if dumped while already depressed. Above
-    PRICE_RATIO_HEALTHY, a throttled good can sell somewhat more than
-    its base cap, since the price has room to absorb it."""
+    own price further down if dumped while already depressed.
+
+    Deliberately does NOT sell MORE than base_cap even when price is
+    healthy - tried that first (double the cap above
+    PRICE_RATIO_HEALTHY) and it was a confirmed real-engine regression
+    (-8.2%, $19,564 vs $21,315 baseline). Root cause: for the steepest
+    glut-risk goods (melon above_target 3.60, wool 3.20), selling MORE
+    right when price recovers is exactly what pushes it straight back
+    into crash territory - the original flat, conservative cap was
+    already doing its job correctly for those, and the "sell more when
+    healthy" idea undid that safety margin. Only ever throttling DOWN
+    (never up) keeps the easing-off behavior, which is unambiguously
+    safe, without the harmful half."""
     if available <= 0:
         return 0
     base_price = BASE_PRICE.get(item)
@@ -178,11 +188,9 @@ def dynamic_sell_quantity(available, current_price, item, base_cap=None):
             return min(available, max(1, available // 4))
         return available
 
-    # Throttled good - scale the cap with price health.
+    # Throttled good - only ever reduce the cap, never raise it.
     if price_ratio <= PRICE_RATIO_CRASHED:
         cap = max(0, base_cap // 2)
-    elif price_ratio >= PRICE_RATIO_HEALTHY:
-        cap = base_cap * 2
     else:
         cap = base_cap
     return min(available, cap)
