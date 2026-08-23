@@ -50,17 +50,43 @@ def crop_hand_target(unlocked_quadrants):
 def total_hand_target(unlocked_quadrants):
     return crop_hand_target(unlocked_quadrants) + ANIMAL_HANDLER_COUNT
 
-CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80}
+CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80, "STRAWBERRY": 100}
 # "Time to Max Yield" for one-time crops, unfertilized (from the spec
 # table). Harvesting before this age locks in a smaller yield than
 # waiting, since the tile clears on harvest - no second chance.
-CROP_MATURITY_DAY = {"WHEAT": 4, "CARROT": 3, "MELON": 10}
+CROP_MATURITY_DAY = {"WHEAT": 4, "CARROT": 3, "MELON": 10, "STRAWBERRY": 10}
 # Order to prefer when planting - cheap staples first (wheat/carrot),
 # melon last. Melon is expensive ($80) and slow (10 days to harvest) -
 # only worth planting once staples are already stocked, not instead of
 # them. NOT profitable to fertilize (see FERTILIZE_ELIGIBLE_CROPS below
 # for why wheat/carrot are excluded from that, despite being crops here).
-CROP_PRIORITY = ["WHEAT", "CARROT", "MELON"]
+CROP_PRIORITY = ["WHEAT", "CARROT", "MELON", "STRAWBERRY"]
+
+# Strawberry is ONGOING (like tomato), not one-time like wheat/carrot/
+# melon: it produces repeatedly at fixed ages (10, 12, 14, 16 - spec:
+# "strawberry at ages 10, 12, 14, 16") instead of a single harvest that
+# clears the tile. HARVEST must NOT be treated as "remove the plant"
+# for these - is_ready_to_harvest and the harvest action itself are
+# already generic (just "yield_units > 0 and age >= first-yield-age"),
+# so no agent-decision-logic change is needed; this only matters for
+# accurately SIMULATING it in the local test harnesses, which
+# previously assumed every harvest clears the tile (fine for one-time
+# crops, wrong for ongoing ones - see tests/full_harness.py).
+ONE_TIME_CROPS = {"WHEAT", "CARROT", "MELON"}
+ONGOING_CROP_SCHEDULE = {"STRAWBERRY": (10, 12, 14, 16)}
+
+# Strawberry-tile quota, same reasoning as MELON_TILE_TARGET below -
+# without a guaranteed share, an expensive/slow crop never wins the
+# "what to plant" competition against wheat/carrot, which stay
+# restocked almost continuously.
+STRAWBERRY_TILE_TARGET = 2
+# Deliberately NOT fertilizing strawberry despite the spec's "fertilized
+# AND watered same day doubles yield to 2" - the fertilizer bonus lasts
+# only 3 days, strawberry's scheduled productions are 2 days apart, and
+# hitting the exact right day consistently needs real timing precision
+# this agent doesn't have yet. Revisit only with a concrete plan for
+# that timing, not as a guess (same discipline as the Day 14 wheat/
+# carrot fertilizer decision - computed, not assumed).
 
 # Wheat/carrot get bought to restock almost continuously (see seed-buy
 # logic below), which meant melon seeds - always last in CROP_PRIORITY -
@@ -102,11 +128,64 @@ FERTILIZE_MAX_AGE = 7
 # (above_target >= 1.5) - dumping the whole shed at once would crash
 # their own price. Anything not listed here (wheat, carrot, egg) stays
 # on bulk-sell; their glut risk is low/medium and bulk-selling is safe.
+# These are the FLOOR/base caps - actual per-turn cap is adjusted up or
+# down from here based on the CURRENT market price relative to base
+# price (see dynamic_sell_quantity below), instead of a single flat
+# number regardless of how healthy or crashed the price already is.
 SELL_CAP_PER_TURN = {
     "MILK": 3,
     "MELON": 2,
     "WOOL": 2,
+    "STRAWBERRY": 2,
 }
+
+# Base market price for every sellable good (from the spec's price
+# table / economics.py) - used only to compute price_ratio =
+# current_price / base_price, a cheap read of "is this price healthy,
+# or already crashed" without needing the full price-curve formula.
+BASE_PRICE = {
+    "WHEAT": 25, "CARROT": 35, "TOMATO": 60, "STRAWBERRY": 120,
+    "MELON": 250, "EGG": 50, "MILK": 160, "WOOL": 200, "FERTILIZER": 100,
+}
+
+# Thresholds for price_ratio = current_price / base_price.
+PRICE_RATIO_HEALTHY = 0.75   # at/above this, price has room - sell more
+PRICE_RATIO_CRASHED = 0.40   # at/below this, price is already hurting -
+                              # sell less, let it recover instead of
+                              # grinding it further toward the floor
+
+
+def dynamic_sell_quantity(available, current_price, item, base_cap=None):
+    """How much of `item` to sell this turn, reacting to the ACTUAL
+    current market price instead of a fixed guess. `base_cap` is the
+    normal per-turn ceiling for throttled goods (None means normally
+    unlimited, i.e. bulk-sell staples). Below PRICE_RATIO_CRASHED, sell
+    much less regardless of category - even a "safe" staple grinds its
+    own price further down if dumped while already depressed. Above
+    PRICE_RATIO_HEALTHY, a throttled good can sell somewhat more than
+    its base cap, since the price has room to absorb it."""
+    if available <= 0:
+        return 0
+    base_price = BASE_PRICE.get(item)
+    if not base_price:
+        return available if base_cap is None else min(available, base_cap)
+    price_ratio = current_price / base_price
+
+    if base_cap is None:
+        # Bulk-sell good (staple) - normally sell everything, but ease
+        # off if the price has already crashed well below base.
+        if price_ratio <= PRICE_RATIO_CRASHED:
+            return min(available, max(1, available // 4))
+        return available
+
+    # Throttled good - scale the cap with price health.
+    if price_ratio <= PRICE_RATIO_CRASHED:
+        cap = max(0, base_cap // 2)
+    elif price_ratio >= PRICE_RATIO_HEALTHY:
+        cap = base_cap * 2
+    else:
+        cap = base_cap
+    return min(available, cap)
 
 # Fibonacci-ish hire cost sequence, indexed by hires_today (0-indexed).
 # Matches farmHandCostMult(=1) * fib(n), fib starting 1,1,2,3,5,8,...
@@ -432,21 +511,25 @@ def count_plant_tiles_by_crop(tiles, board_size):
 
 
 def choose_crop_to_plant(remaining_seeds, plant_counts):
-    """Which crop to plant on an empty tile this turn. Melon gets a
-    guaranteed share (up to MELON_TILE_TARGET) instead of always losing
-    out to wheat/carrot, which stay restocked almost continuously - see
+    """Which crop to plant on an empty tile this turn. Melon and
+    strawberry each get a guaranteed share instead of always losing out
+    to wheat/carrot, which stay restocked almost continuously - see
     Day 14 decisions log for why melon was going unplanted without this.
-    But only once wheat has a foothold - melon claiming tiles before any
-    cash-generating crop exists starves early cash flow for its whole
-    10-day cycle (also Day 14 decisions log)."""
+    But only once wheat has a foothold - claiming tiles before any
+    cash-generating crop exists starves early cash flow for the whole
+    10+ day cycle of a premium crop (also Day 14 decisions log)."""
     wheat_established = plant_counts.get("WHEAT", 0) >= MIN_WHEAT_TILES_BEFORE_MELON
-    if wheat_established and remaining_seeds.get("MELON", 0) > 0 and plant_counts.get("MELON", 0) < MELON_TILE_TARGET:
-        return "MELON"
+    if wheat_established:
+        if remaining_seeds.get("MELON", 0) > 0 and plant_counts.get("MELON", 0) < MELON_TILE_TARGET:
+            return "MELON"
+        if remaining_seeds.get("STRAWBERRY", 0) > 0 and plant_counts.get("STRAWBERRY", 0) < STRAWBERRY_TILE_TARGET:
+            return "STRAWBERRY"
     for crop in ("WHEAT", "CARROT"):
         if remaining_seeds.get(crop, 0) > 0:
             return crop
-    if remaining_seeds.get("MELON", 0) > 0:
-        return "MELON"  # staples exhausted too - plant melon anyway
+    for crop in ("MELON", "STRAWBERRY"):
+        if remaining_seeds.get(crop, 0) > 0:
+            return crop  # staples exhausted too - plant a premium crop anyway
     return None
 
 
@@ -518,20 +601,27 @@ def agent(obs):
     wheat_reserve = WHEAT_FEED_RESERVE_PER_ANIMAL * animal_count
     if have_handler_capacity:
         wheat_reserve += WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE
+    market_prices = obs.get("market", {}).get("prices", {})
+
     for item in ("WHEAT", "CARROT", "EGG"):
         n = shed.get(item, 0)
         if item == "WHEAT":
             n = max(0, n - wheat_reserve)
         if n > 0:
-            market.append(["SELL", item, n])
+            sell_n = dynamic_sell_quantity(n, market_prices.get(item, BASE_PRICE.get(item, 0)), item)
+            if sell_n > 0:
+                market.append(["SELL", item, sell_n])
     # Generalized throttled sell for every high-glut-risk good (was
     # milk-only; melon needed the same treatment - above_target 3.60,
     # even worse than milk's 1.60 - so this now covers both from one
-    # table instead of duplicating the same pattern per-item).
+    # table instead of duplicating the same pattern per-item). Caps are
+    # now price-aware (Day 17) instead of flat - see dynamic_sell_quantity.
     for item, cap in SELL_CAP_PER_TURN.items():
         n = shed.get(item, 0)
         if n > 0:
-            market.append(["SELL", item, min(n, cap)])
+            sell_n = dynamic_sell_quantity(n, market_prices.get(item, BASE_PRICE.get(item, 0)), item, base_cap=cap)
+            if sell_n > 0:
+                market.append(["SELL", item, sell_n])
 
     # --- buy seed for whichever crop we're out of, cheapest first ---
     for crop in CROP_PRIORITY:

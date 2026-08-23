@@ -14,11 +14,13 @@ from main import agent  # noqa: E402
 
 BOARD_SIZE = 10
 STARTING_MONEY = 3000
-PRICES = {"WHEAT": 25, "CARROT": 35, "EGG": 50, "MILK": 160, "MELON": 250, "FERTILIZER": 100, "WOOL": 200}
-SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80}
+PRICES = {"WHEAT": 25, "CARROT": 35, "EGG": 50, "MILK": 160, "MELON": 250, "FERTILIZER": 100, "WOOL": 200, "STRAWBERRY": 120}
+SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80, "STRAWBERRY": 100}
 ANIMAL_COST = {"GOOSE": 300, "COW": 400, "SHEEP": 500}
-MATURITY = {"WHEAT": 4, "CARROT": 3, "MELON": 10}
+MATURITY = {"WHEAT": 4, "CARROT": 3, "MELON": 10, "STRAWBERRY": 10}
 CAP = {"WHEAT": 4, "CARROT": 3, "MELON": 6}
+ONE_TIME_CROPS = {"WHEAT", "CARROT", "MELON"}
+ONGOING_CROP_SCHEDULE = {"STRAWBERRY": (10, 12, 14, 16)}
 HIRE_COST_SEQUENCE = [1, 1, 2, 3, 5, 8, 13, 21, 34]
 
 
@@ -179,7 +181,10 @@ def run(turns=720, verbose=True, label=""):
                 if isinstance(tile, dict) and tile.get("kind") == "PLANT" and tile.get("yield_units", 0) > 0:
                     crop = tile["crop"]
                     shed[crop] = shed.get(crop, 0) + tile["yield_units"]
-                    tiles[y][x] = None
+                    if crop in ONE_TIME_CROPS:
+                        tiles[y][x] = None
+                    else:
+                        tile["yield_units"] = 0  # ongoing crop - tile persists, keeps producing
                 elif isinstance(tile, dict) and tile.get("kind") in ("COOP", "PASTURE") and tile.get("yield_units", 0) > 0:
                     product = {"GOOSE": "EGG", "COW": "MILK", "SHEEP": "WOOL"}.get(tile.get("animal"), "EGG")
                     shed[product] = shed.get(product, 0) + tile["yield_units"]
@@ -262,7 +267,15 @@ def run(turns=720, verbose=True, label=""):
                         continue
                     if t.get("kind") == "PLANT":
                         crop = t["crop"]
-                        if t["watered_today"]:
+                        if crop in ONGOING_CROP_SCHEDULE:
+                            # Ongoing crop: +1 yield ONLY on a scheduled
+                            # production day (not continuous daily
+                            # accumulation like one-time crops), and
+                            # only if watered that day.
+                            age = day - t["planted_day"]
+                            if t["watered_today"] and age in ONGOING_CROP_SCHEDULE[crop]:
+                                t["yield_units"] = t["yield_units"] + 1
+                        elif t["watered_today"]:
                             age = day - t["planted_day"]
                             if age >= 2:
                                 t["yield_units"] = min(CAP.get(crop, 4), t["yield_units"] + 1)
