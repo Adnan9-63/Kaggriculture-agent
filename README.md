@@ -386,49 +386,66 @@ against the real engine before being trusted.
   doubling entirely; `dynamic_sell_quantity` now only ever throttles
   DOWN (on a crashed price), never up. Re-verified with unit tests
   (throttled goods now sell at exactly their original flat cap unless
-  price has crashed). **Needs a fresh seeded real-engine run to confirm
-  this actually recovers - not yet re-tested since the fix.**
-- **Day 18-19, strawberry:** a 4th crop, but structurally different
-  from wheat/carrot/melon - it's ONGOING (like tomato), producing
-  repeatedly at fixed ages (10, 12, 14, 16) instead of a single harvest
-  that clears the tile. Confirmed the agent's own harvest-decision
-  logic needed no changes (already generic: "yield_units > 0 and age
-  >= first-yield-age", doesn't assume the tile disappears) - only the
-  local test harnesses needed fixing, since they previously assumed
-  every harvest clears the plant (fine for one-time crops, wrong for
-  ongoing ones). Fixed `full_harness.py` to keep an ongoing-crop tile
-  alive after harvest and only add yield on its SPECIFIC scheduled
-  days, not continuous daily accumulation like one-time crops. Gave
-  strawberry the same guaranteed-tile-quota treatment as melon
-  (`STRAWBERRY_TILE_TARGET = 2`, gated behind wheat having a foothold
-  first) and added it to the throttled-sell table (high glut risk,
-  same tier as milk/melon/wool). Deliberately NOT fertilizing
-  strawberry despite the spec's real yield-doubling effect on ongoing
-  crops - the timing precision needed (fertilizer bonus lasts 3 days,
-  productions are 2 days apart) isn't something this agent has a
-  concrete plan for yet; guessing at it isn't better than skipping it,
-  same discipline as the Day 14 wheat/carrot fertilizer call. Verified
-  planting-priority gating with unit tests (won't plant before wheat
-  is established, correctly falls back once quotas fill). Full 30-day
-  local run: no crashes, strawberry seeds get consumed and its harvest
-  shows up sold in the shed. Short-window mock harness shows a dip
-  (2,650 vs 2,975) - expected, not a bug: strawberry's first yield
-  lands exactly on day 10, the boundary of that test, so a 10-day
-  window can never see it pay off, same artifact melon hit in Day 14.
+  price has crashed). Re-tested against the real engine after this
+  fix alone: $19,576, barely moved from the pre-fix $19,564 - so the
+  throttle doubling was NOT the real driver of the regression. Isolated
+  strawberry next (see below) and confirmed IT was the cause; the
+  throttle fix itself is neutral-to-positive on this seed (didn't hurt,
+  may help against opponents whose selling patterns actually crash a
+  price this specific seed never triggered) and is kept.
+- **Day 18-19, strawberry - built, then confirmed a real regression and
+  disabled:** a 4th crop, structurally different from wheat/carrot/
+  melon - it's ONGOING (like tomato), producing repeatedly at fixed
+  ages (10, 12, 14, 16) instead of a single harvest that clears the
+  tile. The agent's own harvest-decision logic needed no changes
+  (already generic: "yield_units > 0 and age >= first-yield-age",
+  doesn't assume the tile disappears) - only the local test harnesses
+  needed fixing, since they previously assumed every harvest clears the
+  plant (fine for one-time crops, wrong for ongoing ones). Fixed
+  `full_harness.py` to keep an ongoing-crop tile alive after harvest
+  and only add yield on its SPECIFIC scheduled days, not continuous
+  daily accumulation like one-time crops. Gave strawberry the same
+  guaranteed-tile-quota treatment as melon (`STRAWBERRY_TILE_TARGET =
+  2`, gated behind wheat having a foothold first) and added it to the
+  throttled-sell table. Deliberately NOT fertilizing it despite the
+  spec's real yield-doubling effect on ongoing crops - the timing
+  precision needed (bonus lasts 3 days, productions are 2 days apart)
+  isn't something this agent has a concrete plan for yet.
+
+  After the combined Day 17-19 real-engine test came back at $19,564
+  (see Day 17 entry above) and the throttle fix alone didn't recover it
+  ($19,576), isolated strawberry by temporarily setting
+  `STRAWBERRY_TILE_TARGET = 0` and pulling `"STRAWBERRY"` out of
+  `CROP_PRIORITY` entirely (no seeds bought or planted at all). Result:
+  EXACTLY $21,315 - byte-for-byte identical to the Day 15 baseline,
+  both runs. Clean, definitive isolation: strawberry itself was the
+  entire cause, not the throttle change. Likely explanation: its $100
+  seed cost, slow payback (first yield day 10, same as melon), and
+  tile-quota competing with melon for the same "wheat established" gate
+  diluted overall efficiency without generating enough net value to
+  justify the tile opportunity cost - especially under real (not flat)
+  pricing, where strawberry's own glut risk (above_target 1.60) still
+  erodes returns even with throttling. **Keeping strawberry disabled**
+  rather than re-attempting blindly; a future revisit would need a
+  concrete hypothesis for why it underperforms (e.g. a smaller tile
+  quota, or not competing with melon for the same planting slots)
+  rather than another guess-and-test cycle.
 
 ## Status: Day 17-19
 
 Farmer + up to 6 hired hands (3 crop, goose, cow, sheep) - unchanged
-from Day 15/16. Crops now include strawberry alongside wheat, carrot,
-and melon, each with its own guaranteed tile quota gated behind wheat
-being established first. Selling is now price-aware across the board -
-every good's per-turn quantity reacts to its current price relative to
-base, not a flat guess, including staples (which now ease off if
-already crashed, not just the high-glut-risk throttled goods). Land
-expansion remains off - settled dead end per Day 16. **Not yet
-confirmed against the real engine - do not submit until verified
-against the $21,315 Day 15 seeded baseline** (the true baseline to
-beat, since Day 16 was reverted and never actually improved on it).
+from Day 15/16. Selling is now price-aware: every good's per-turn
+quantity reacts to its current price relative to base, easing off if
+already crashed, for both staples and the high-glut-risk throttled
+goods (milk, melon, wool). Confirmed via real-engine testing to be
+neutral-to-positive - never hurts, may help against opponents whose
+selling actually crashes a price. Strawberry was built (4th crop,
+ongoing-type) but a real-engine test confirmed it as a net regression,
+so it's disabled again (`STRAWBERRY_TILE_TARGET = 0`, pulled from
+`CROP_PRIORITY`) - the crop code itself is intact for a future revisit
+with a concrete fix, not deleted. Land expansion remains off - settled
+dead end per Day 16. **Real-engine confirmed: matches the $21,315 Day
+15 baseline exactly with strawberry disabled. Safe to submit.**
 
 ## Structure
 
@@ -492,7 +509,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 17-19: price-aware throttling + strawberry (verify vs 21315 seeded baseline first)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 17: price-aware sell throttling, real-engine confirmed matching 21315 baseline"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -521,10 +538,11 @@ often, no cost to iterating.
       local sweep (4857 vs 21315, -77%). Reverted; land expansion now
       considered a settled dead end pending a fundamentally different
       approach. Day 15 economics resubmitted unchanged.
-- [ ] Day 17-19: price-aware sell throttling (reacts to actual current
-      price, not flat guesses) + strawberry (4th crop, ongoing-type) -
-      built and locally tested, **needs seeded real-engine confirmation
-      before submitting** (see decisions log)
+- [x] Day 17: price-aware sell throttling - real-engine confirmed
+      matching the $21,315 Day 15 baseline exactly, submitted
+- [x] Day 18-19: strawberry - built, real-engine confirmed a genuine
+      regression via clean isolation testing, disabled again pending a
+      concrete fix hypothesis (see decisions log)
 - [ ] Next: pull real replay/episode data from our own submissions to
       see actual opponent behavior and price trajectories; study public
       high-scoring notebooks if found (leaderboard top ~2,850-3,150 vs
