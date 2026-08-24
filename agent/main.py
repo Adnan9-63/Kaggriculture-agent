@@ -60,7 +60,10 @@ CROP_MATURITY_DAY = {"WHEAT": 4, "CARROT": 3, "MELON": 10, "STRAWBERRY": 10}
 # only worth planting once staples are already stocked, not instead of
 # them. NOT profitable to fertilize (see FERTILIZE_ELIGIBLE_CROPS below
 # for why wheat/carrot are excluded from that, despite being crops here).
-CROP_PRIORITY = ["WHEAT", "CARROT", "MELON", "STRAWBERRY"]
+CROP_PRIORITY = ["WHEAT", "CARROT", "MELON"]  # STRAWBERRY temporarily
+# removed for isolation testing (see STRAWBERRY_TILE_TARGET above) -
+# excluded here too so seed-buying never touches it either, for a
+# clean test. Restore "STRAWBERRY" to this list once isolated.
 
 # Strawberry is ONGOING (like tomato), not one-time like wheat/carrot/
 # melon: it produces repeatedly at fixed ages (10, 12, 14, 16 - spec:
@@ -79,7 +82,13 @@ ONGOING_CROP_SCHEDULE = {"STRAWBERRY": (10, 12, 14, 16)}
 # without a guaranteed share, an expensive/slow crop never wins the
 # "what to plant" competition against wheat/carrot, which stay
 # restocked almost continuously.
-STRAWBERRY_TILE_TARGET = 2
+STRAWBERRY_TILE_TARGET = 0  # TEMPORARILY disabled for isolation testing -
+                             # the Day 17 throttle fix alone didn't recover
+                             # the real-engine regression ($19,576 vs
+                             # $19,564 pre-fix, basically no change), so
+                             # strawberry itself is the remaining suspect.
+                             # Set back to 2 once isolated one way or the
+                             # other - see Day 17-19 decisions log.
 # Deliberately NOT fertilizing strawberry despite the spec's "fertilized
 # AND watered same day doubles yield to 2" - the fertilizer bonus lasts
 # only 3 days, strawberry's scheduled productions are 2 days apart, and
