@@ -253,6 +253,12 @@ def run(turns=720, verbose=True, label=""):
                     tile["cared_today"] = True
                 else:
                     wasted_turns += 1
+            elif act == "COLLECT_FERTILIZER":
+                if isinstance(tile, dict) and tile.get("kind") in ("COOP", "PASTURE") and tile.get("fertilizer_available"):
+                    tile["fertilizer_available"] = False
+                    inventories[i]["FERTILIZER"] = inventories[i].get("FERTILIZER", 0) + 1
+                else:
+                    wasted_turns += 1
             elif act == "PASS":
                 wasted_turns += 1
 
@@ -291,6 +297,8 @@ def run(turns=720, verbose=True, label=""):
                                 t["animal"] = None
                                 t["yield_units"] = 0
                                 t["consecutive_unfed"] = 0
+                        if t["animal"]:  # survived the day (escape check above)
+                            t["fertilizer_available"] = True
                         t["fed_today"] = False
                         t["cared_today"] = False
             # All units (farmer AND hands) drop inventory into the shed

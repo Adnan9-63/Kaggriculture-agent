@@ -104,7 +104,19 @@ STRAWBERRY_TILE_TARGET = 0  # TEMPORARILY disabled for isolation testing -
 # capped) share of tiles instead of leaving it to leftover priority -
 # modest allocation given melon's long 10-day cycle and the board's
 # limited 25 tiles.
-MELON_TILE_TARGET = 3
+MELON_TILE_TARGET = 5
+# Day 20: raised from 3 to 5 - a local sweep (after adding free
+# fertilizer collection, see COLLECT_FERTILIZER handling below) showed
+# money climbing monotonically all the way to 8+ tiles in the flat-price
+# simulator (25,040 -> 26,660 -> 29,320 -> 31,800 -> 35,530 for
+# 3/4/5/6/8). NOT trusting that trend at face value: melon has the
+# single steepest glut-risk curve in the whole game (above_target 3.60,
+# steeper even than wool's 3.20), and flat pricing literally cannot see
+# its price crashing no matter how much gets sold - the same blind spot
+# that made land expansion and strawberry look good locally and then
+# fail hard against the real engine. Taking the smallest meaningful step
+# up (5, not 8) and requiring real-engine confirmation before pushing
+# further, rather than repeating that mistake a third time.
 # Don't let melon claim tiles before wheat has a real foothold - a solo
 # farmer (or any short early stretch) planting melon FIRST, before any
 # wheat exists, starves cash flow for melon's whole 10-day cycle with
@@ -412,11 +424,20 @@ def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
             order = ["BUY_ANIMAL", animal, 1]
         return (None, order, False, None)
 
-    # animal is placed - only interrupt crop work when it actually needs us
+    # animal is placed - only interrupt crop work when it actually needs
+    # us. Includes fertilizer_available: every surviving animal makes 1
+    # fertilizer available daily for free (spec), and we were leaving it
+    # uncollected entirely - a real waste, since we're separately
+    # spending real money (BUY_PRODUCT) on the exact same resource for
+    # melon fertilizing. Uncollected fertilizer doesn't decay or expire
+    # (spec: "an animal left alone for five days still yields 1 unit"),
+    # so it's safe to treat as lowest priority - collect whenever there's
+    # nothing more urgent, never at the expense of feed/harvest/care.
     needs_attention = (
         not structure_tile.get("fed_today")
         or structure_tile.get("yield_units", 0) > 0
         or not structure_tile.get("cared_today")
+        or structure_tile.get("fertilizer_available", False)
     )
     if not needs_attention:
         return (None, None, False, None)
@@ -431,6 +452,8 @@ def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
         return (["HARVEST"], None, True, None)
     if not structure_tile.get("cared_today"):
         return (["CARE"], None, True, None)
+    if structure_tile.get("fertilizer_available", False):
+        return (["COLLECT_FERTILIZER"], None, True, None)
     return (["PASS"], None, True, None)
 
 

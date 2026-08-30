@@ -431,21 +431,48 @@ against the real engine before being trusted.
   quota, or not competing with melon for the same planting slots)
   rather than another guess-and-test cycle.
 
-## Status: Day 17-19
+- **Day 20, free fertilizer collection + melon tile scaling:** noticed
+  the spec gives every surviving animal 1 free fertilizer per day
+  ("fertilizer_available"), uncollected and unused the whole time -
+  meanwhile we were separately spending real money (`BUY_PRODUCT`) on
+  the identical resource for melon fertilizing. Added
+  `COLLECT_FERTILIZER` to the animal handler's priority chain, lowest
+  priority since the spec confirms it never expires or decays if
+  delayed ("an animal left alone for five days still yields 1 unit") -
+  never competes with feed/harvest/care. Verified with unit tests
+  (feed still wins over collection; collection only fires when nothing
+  more urgent needs doing). Extended `full_harness.py` to simulate it
+  (was entirely unmodeled before). Result: paid fertilizer purchases
+  dropped from 9/season to 3-5, fertilizer applications went UP (9 to
+  16), and the shed showed a real surplus (64-67 unused units) -
+  clear evidence we'd been under-utilizing a genuinely free resource.
+
+  That surplus directly motivated the second half: a local sweep of
+  `MELON_TILE_TARGET` (3 through 8) showed money climbing monotonically
+  the whole way (25,040 to 35,530 in the flat-price sim). Deliberately
+  NOT trusting that trend at face value - melon has the single steepest
+  glut-risk curve in the game (above_target 3.60, steeper even than
+  wool's 3.20), and flat pricing literally cannot show its price
+  crashing no matter how much gets sold, the same blind spot that made
+  land expansion and strawberry look great locally before both failed
+  hard against the real engine. Took the smallest meaningful step (3
+  to 5, not straight to 8) rather than repeat that mistake a third
+  time. **Real-engine confirmation is required before pushing this
+  further or trusting the local number - not yet tested since these
+  changes.**
+
+## Status: Day 20
 
 Farmer + up to 6 hired hands (3 crop, goose, cow, sheep) - unchanged
-from Day 15/16. Selling is now price-aware: every good's per-turn
-quantity reacts to its current price relative to base, easing off if
-already crashed, for both staples and the high-glut-risk throttled
-goods (milk, melon, wool). Confirmed via real-engine testing to be
-neutral-to-positive - never hurts, may help against opponents whose
-selling actually crashes a price. Strawberry was built (4th crop,
-ongoing-type) but a real-engine test confirmed it as a net regression,
-so it's disabled again (`STRAWBERRY_TILE_TARGET = 0`, pulled from
-`CROP_PRIORITY`) - the crop code itself is intact for a future revisit
-with a concrete fix, not deleted. Land expansion remains off - settled
-dead end per Day 16. **Real-engine confirmed: matches the $21,315 Day
-15 baseline exactly with strawberry disabled. Safe to submit.**
+from Day 15/16. Selling is price-aware (Day 17, confirmed safe).
+Strawberry stays disabled (Day 18-19, confirmed regression). New this
+round: animal handlers now collect the free daily fertilizer instead of
+leaving it unclaimed, and melon's guaranteed tile share is raised from
+3 to 5 to use the resulting surplus. Land expansion remains off -
+settled dead end per Day 16. **Not yet confirmed against the real
+engine - do not submit until verified against the $21,315 Day 17
+baseline** (the true current baseline, since Day 18-19's strawberry
+regression was isolated and reverted, matching Day 15/17 exactly).
 
 ## Structure
 
@@ -509,7 +536,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 17: price-aware sell throttling, real-engine confirmed matching 21315 baseline"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 20: free fertilizer collection + melon tiles 3->5 (verify vs 21315 seeded baseline first)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -543,8 +570,16 @@ often, no cost to iterating.
 - [x] Day 18-19: strawberry - built, real-engine confirmed a genuine
       regression via clean isolation testing, disabled again pending a
       concrete fix hypothesis (see decisions log)
-- [ ] Next: pull real replay/episode data from our own submissions to
-      see actual opponent behavior and price trajectories; study public
-      high-scoring notebooks if found (leaderboard top ~2,850-3,150 vs
-      our 669.7)
+- [ ] Day 20: free fertilizer collection (was entirely unclaimed before)
+      + melon tile target 3->5 to use the resulting surplus - local
+      sweep looked strong but deliberately not trusted at face value
+      (melon has the steepest glut-risk curve in the game, flat pricing
+      can't see it crash), **needs seeded real-engine confirmation
+      before submitting**
+- [ ] Next: pull real replay/episode data - a public dataset
+      (`georgymamarin/kaggriculture-episodes` on Kaggle) covers every
+      ladder game across the whole competition with a companion
+      analysis notebook on what top bots do differently; also study any
+      other public high-scoring notebooks found (leaderboard top
+      ~2,850-3,150 vs our current best 669.7)
 - [ ] Week 4-6: iterate against ladder opponents using downloaded replays/logs
