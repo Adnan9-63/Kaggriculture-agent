@@ -461,18 +461,42 @@ against the real engine before being trusted.
   further or trusting the local number - not yet tested since these
   changes.**
 
-## Status: Day 20
+- **Day 20, submitted and confirmed:** real-engine seeded test came back
+  at $23,550 vs $21,315 baseline (+10.5%), reproduced identically
+  twice. Submitted and live - immediately became the highest-rated
+  active submission (474.1, previous best 392.7).
+- **Day 21, melon pushed further, one false alarm resolved:** given two
+  consecutive confirmed real wins in the same direction (melon at all
+  in Day 14, then 3->5 in Day 20), raised `MELON_TILE_TARGET` again to
+  7. Also re-ran the `CROP_HANDS_PER_QUADRANT` sweep given how much the
+  farm's composition has changed since Day 12's original tuning - 3
+  remains clearly better than 4 at every melon target tested, so no
+  change there. Local full-season test showed `BUY_ANIMAL: 4` instead
+  of the expected 3, raising a real concern (matches the shape of the
+  Day 13 starve/re-buy bug) - traced it directly with a clean adhoc
+  script that only counts CONFIRMED purchases, which showed exactly 3
+  successful buys and zero escapes. Root cause of the discrepancy:
+  `full_harness.py`'s `action_log` counts every ISSUED market order
+  regardless of whether the affordability check let it through, so "4"
+  just meant one attempt got rejected that turn for insufficient funds
+  - zero real economic impact. Same false-alarm pattern as `BUILD_COOP:
+  2` back in Day 14 (issued attempts vs confirmed successes). No agent
+  fix needed. **Real-engine confirmation still required before
+  submitting or trusting the local number, per the usual discipline for
+  melon changes given its steep glut-risk curve.**
+
+## Status: Day 21
 
 Farmer + up to 6 hired hands (3 crop, goose, cow, sheep) - unchanged
 from Day 15/16. Selling is price-aware (Day 17, confirmed safe).
-Strawberry stays disabled (Day 18-19, confirmed regression). New this
-round: animal handlers now collect the free daily fertilizer instead of
-leaving it unclaimed, and melon's guaranteed tile share is raised from
-3 to 5 to use the resulting surplus. Land expansion remains off -
-settled dead end per Day 16. **Not yet confirmed against the real
-engine - do not submit until verified against the $21,315 Day 17
-baseline** (the true current baseline, since Day 18-19's strawberry
-regression was isolated and reverted, matching Day 15/17 exactly).
+Strawberry stays disabled (Day 18-19, confirmed regression). Free
+fertilizer collection and melon tile scaling (Day 20, confirmed +10.5%
+real gain) both live. This round pushes melon's guaranteed tile share
+further, from 5 to 7, building on two consecutive confirmed wins in
+that direction. Land expansion remains off - settled dead end per Day
+16. **Not yet confirmed against the real engine - do not submit until
+verified against the $23,550 Day 20 baseline** (the current true
+baseline, now that Day 20 is live and confirmed).
 
 ## Structure
 
@@ -536,7 +560,7 @@ this to decide what to add next, not gut feel.
 ## Submit to Kaggle
 
 ```bash
-kaggle competitions submit kaggriculture -f agent/main.py -m "Day 20: free fertilizer collection + melon tiles 3->5 (verify vs 21315 seeded baseline first)"
+kaggle competitions submit kaggriculture -f agent/main.py -m "Day 21: melon tiles 5->7 (verify vs 23550 seeded baseline first)"
 kaggle competitions submissions kaggriculture     # check status
 kaggle competitions episodes <SUBMISSION_ID>       # once it's played games
 kaggle competitions leaderboard kaggriculture -s   # check ranking
@@ -570,12 +594,15 @@ often, no cost to iterating.
 - [x] Day 18-19: strawberry - built, real-engine confirmed a genuine
       regression via clean isolation testing, disabled again pending a
       concrete fix hypothesis (see decisions log)
-- [ ] Day 20: free fertilizer collection (was entirely unclaimed before)
-      + melon tile target 3->5 to use the resulting surplus - local
-      sweep looked strong but deliberately not trusted at face value
-      (melon has the steepest glut-risk curve in the game, flat pricing
-      can't see it crash), **needs seeded real-engine confirmation
-      before submitting**
+- [x] Day 20: free fertilizer collection (was entirely unclaimed before)
+      + melon tile target 3->5 - real-engine CONFIRMED +10.5% ($23,550
+      vs $21,315), submitted, immediately became highest-rated active
+      submission (474.1)
+- [ ] Day 21: melon tile target 5->7, building on two consecutive
+      confirmed wins in that direction - local sweep looks strong, one
+      false-alarm investigated and resolved (action-log counts issued
+      orders, not confirmed successes), **needs seeded real-engine
+      confirmation before submitting**
 - [ ] Next: pull real replay/episode data - a public dataset
       (`georgymamarin/kaggriculture-episodes` on Kaggle) covers every
       ladder game across the whole competition with a companion

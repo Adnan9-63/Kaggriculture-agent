@@ -104,19 +104,25 @@ STRAWBERRY_TILE_TARGET = 0  # TEMPORARILY disabled for isolation testing -
 # capped) share of tiles instead of leaving it to leftover priority -
 # modest allocation given melon's long 10-day cycle and the board's
 # limited 25 tiles.
-MELON_TILE_TARGET = 5
-# Day 20: raised from 3 to 5 - a local sweep (after adding free
-# fertilizer collection, see COLLECT_FERTILIZER handling below) showed
-# money climbing monotonically all the way to 8+ tiles in the flat-price
-# simulator (25,040 -> 26,660 -> 29,320 -> 31,800 -> 35,530 for
-# 3/4/5/6/8). NOT trusting that trend at face value: melon has the
-# single steepest glut-risk curve in the whole game (above_target 3.60,
-# steeper even than wool's 3.20), and flat pricing literally cannot see
-# its price crashing no matter how much gets sold - the same blind spot
-# that made land expansion and strawberry look good locally and then
-# fail hard against the real engine. Taking the smallest meaningful step
-# up (5, not 8) and requiring real-engine confirmation before pushing
-# further, rather than repeating that mistake a third time.
+MELON_TILE_TARGET = 7
+# Day 20: raised from 3 to 5, real-engine CONFIRMED a genuine win
+# (+10.5%, $23,550 vs $21,315 baseline, reproduced identically twice).
+# Day 21: raised again to 7 - two consecutive confirmed wins in this
+# same direction (adding melon at all in Day 14, then 3->5 in Day 20)
+# earns a bit more confidence than a first guess would. Also re-ran the
+# CROP_HANDS_PER_QUADRANT sweep given the farm's composition has
+# changed a lot since Day 12's original tuning - 3 is still clearly
+# better than 4 at every melon target tested, so that stays unchanged.
+# Local sweep still climbs monotonically through 8+ (25,040 -> 35,530
+# for target 3->8) - deliberately NOT jumping straight to that ceiling.
+# Our own sell rate for melon is throttle-capped independent of tile
+# count (SELL_CAP_PER_TURN, price-aware since Day 17), which limits how
+# much more tiles actually increases glut exposure - more tiles mainly
+# means more upfront seed investment, not proportionally more selling
+# pressure. Still respecting that melon has the single steepest
+# glut-risk curve in the game (above_target 3.60) and flat pricing
+# can't see it crash - real-engine confirmation required before trusting
+# this or pushing further, same as every round.
 # Don't let melon claim tiles before wheat has a real foothold - a solo
 # farmer (or any short early stretch) planting melon FIRST, before any
 # wheat exists, starves cash flow for melon's whole 10-day cycle with
