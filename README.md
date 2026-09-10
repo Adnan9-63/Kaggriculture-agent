@@ -494,11 +494,13 @@ against the real engine before being trusted.
   showing that the surplus fertilizer logic helps without breaking the
   budget, and pushing melon to 9 didn't crash the farm. Submitted.
 
-## Status: Day 22
+- **Day 23, the Great Leap Forward**: downloaded 12GB of ladder replays and analyzed top bots (ELO > 2500). Discovered they maintain ~13.5 hands, buy 2.5-3.5 extra quadrants, and plant ~39 strawberries. Previous attempts to scale labor/land failed due to a hidden Fibonacci wage cascade: hands cost $1,596/day at 15 capacity, but the agent's cash reserve was static at $300. Seed and land purchases routinely bankrupt the farm, causing mass worker escapes. Implemented `dynamic_cash_reserve()` to mathematically guarantee tomorrow's wages are safely in the bank before any purchase is made, fixed a Kaggriculture 10-market-order per turn cap that was secretly blocking bulk hiring by allowing hiring across multiple hours, and locked STRAWBERRY fertilization precisely to ages 10, 12, and 14 to mathematically double two yields per application. Real engine confirmed: NO escapes, 13 hands sustained, 3 extra quadrants bought. Massively shattered the $50k barrier!
 
-Farmer + up to 6 hired hands (3 crop, goose, cow, sheep) - unchanged
+## Status: Day 23
+
+Farmer + up to 13 hired hands (dynamic scaling) (3 crop, goose, cow, sheep) - unchanged
 from Day 15/16. Selling is price-aware (Day 17, confirmed safe).
-Strawberry stays disabled (Day 18-19, confirmed regression). Free
+Strawberry is the primary cash crop (Day 23 ladder insight). Free
 fertilizer collection and melon tile scaling (Day 20, confirmed +10.5%
 real gain) both live.
 Day 21 pushed melon to 7 (confirmed $28,696).

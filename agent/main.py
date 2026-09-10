@@ -40,27 +40,21 @@ HAND_CASH_RESERVE = 300    # cash kept in reserve before hiring a hand
 # hands trying to cover 2x the space (which is exactly why the Day 11
 # land-expansion attempt lost money - land grew, labor didn't).
 CROP_HANDS_PER_QUADRANT = 3
-ANIMAL_HANDLER_COUNT = 3   # goose, cow, sheep - constant regardless of land
-
+ANIMAL_HANDLER_COUNT = 3
 
 def crop_hand_target(unlocked_quadrants):
     return CROP_HANDS_PER_QUADRANT * max(1, len(unlocked_quadrants))
 
-
 def total_hand_target(unlocked_quadrants):
-    return crop_hand_target(unlocked_quadrants) + ANIMAL_HANDLER_COUNT
+    return min(13, crop_hand_target(unlocked_quadrants) + ANIMAL_HANDLER_COUNT)
+
+def dynamic_cash_reserve(unlocked_quadrants):
+    hand_target = total_hand_target(unlocked_quadrants)
+    return sum(HIRE_COST_SEQUENCE[:hand_target]) + 100
 
 CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80, "STRAWBERRY": 100}
-# "Time to Max Yield" for one-time crops, unfertilized (from the spec
-# table). Harvesting before this age locks in a smaller yield than
-# waiting, since the tile clears on harvest - no second chance.
 CROP_MATURITY_DAY = {"WHEAT": 4, "CARROT": 3, "MELON": 10, "STRAWBERRY": 10}
-# Order to prefer when planting - cheap staples first (wheat/carrot),
-# melon last. Melon is expensive ($80) and slow (10 days to harvest) -
-# only worth planting once staples are already stocked, not instead of
-# them. NOT profitable to fertilize (see FERTILIZE_ELIGIBLE_CROPS below
-# for why wheat/carrot are excluded from that, despite being crops here).
-CROP_PRIORITY = ["WHEAT", "CARROT", "MELON"]  # STRAWBERRY temporarily
+CROP_PRIORITY = ["WHEAT", "STRAWBERRY", "MELON"]  # STRAWBERRY temporarily
 # removed for isolation testing (see STRAWBERRY_TILE_TARGET above) -
 # excluded here too so seed-buying never touches it either, for a
 # clean test. Restore "STRAWBERRY" to this list once isolated.
@@ -78,48 +72,25 @@ CROP_PRIORITY = ["WHEAT", "CARROT", "MELON"]  # STRAWBERRY temporarily
 ONE_TIME_CROPS = {"WHEAT", "CARROT", "MELON"}
 ONGOING_CROP_SCHEDULE = {"STRAWBERRY": (10, 12, 14, 16)}
 
-# Strawberry-tile quota, same reasoning as MELON_TILE_TARGET below -
-# without a guaranteed share, an expensive/slow crop never wins the
-# "what to plant" competition against wheat/carrot, which stay
-# restocked almost continuously.
-STRAWBERRY_TILE_TARGET = 0  # TEMPORARILY disabled for isolation testing -
-                             # the Day 17 throttle fix alone didn't recover
-                             # the real-engine regression ($19,576 vs
-                             # $19,564 pre-fix, basically no change), so
-                             # strawberry itself is the remaining suspect.
-                             # Set back to 2 once isolated one way or the
-                             # other - see Day 17-19 decisions log.
-# Deliberately NOT fertilizing strawberry despite the spec's "fertilized
-# AND watered same day doubles yield to 2" - the fertilizer bonus lasts
-# only 3 days, strawberry's scheduled productions are 2 days apart, and
-# hitting the exact right day consistently needs real timing precision
-# this agent doesn't have yet. Revisit only with a concrete plan for
-# that timing, not as a guess (same discipline as the Day 14 wheat/
-# carrot fertilizer decision - computed, not assumed).
+def get_strawberry_target(unlocked_quadrants):
+    return 10 * max(1, len(unlocked_quadrants))
 
-# Wheat/carrot get bought to restock almost continuously (see seed-buy
-# logic below), which meant melon seeds - always last in CROP_PRIORITY -
-# never actually got planted even once bought: any empty tile always had
-# wheat or carrot seeds available first. Give melon a guaranteed (but
-# capped) share of tiles instead of leaving it to leftover priority -
-# modest allocation given melon's long 10-day cycle and the board's
-# limited 25 tiles.
-MELON_TILE_TARGET = 9
-# Day 22: raised to 9 and enabling fertilizer for wheat/carrot using surplus.
+def get_melon_target(unlocked_quadrants):
+    return 5 * max(1, len(unlocked_quadrants))
 
 MIN_WHEAT_TILES_BEFORE_MELON = 2
 
-FERTILIZE_ELIGIBLE_CROPS = {"MELON"}
-SURPLUS_ELIGIBLE_CROPS = {"WHEAT", "CARROT"}
+FERTILIZE_ELIGIBLE_CROPS = {"MELON", "STRAWBERRY"}
+SURPLUS_ELIGIBLE_CROPS = {"WHEAT"}
 FERTILIZER_SURPLUS_THRESHOLD = 10
 FERTILIZER_COST = 100
 FERTILIZER_CASH_RESERVE = 200
-# Apply fertilizer while still early in the bonus window (starts age 6)
-# so the doubled bonus has time to matter before the window closes at
-# age 12. Age 2-7 gives a few turns of slack for a hand to reach the
-# tile without missing the window entirely.
-FERTILIZE_MIN_AGE = 2
-FERTILIZE_MAX_AGE = 7
+
+FERTILIZE_WINDOW = {
+    "MELON": (2, 7),
+    "STRAWBERRY": (8, 14),
+    "WHEAT": (2, 4)
+}
 
 # Per-turn sell cap for goods where economics.py shows HIGH glut risk
 # (above_target >= 1.5) - dumping the whole shed at once would crash
@@ -194,7 +165,7 @@ def dynamic_sell_quantity(available, current_price, item, base_cap=None):
 
 # Fibonacci-ish hire cost sequence, indexed by hires_today (0-indexed).
 # Matches farmHandCostMult(=1) * fib(n), fib starting 1,1,2,3,5,8,...
-HIRE_COST_SEQUENCE = [1, 1, 2, 3, 5, 8, 13, 21, 34]
+HIRE_COST_SEQUENCE = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597]
 
 ANIMAL_COST = {"GOOSE": 300, "COW": 400, "SHEEP": 500}
 ANIMAL_CASH_RESERVE = 300  # keep this much in reserve before buying an animal
@@ -252,8 +223,7 @@ WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE = 5
 # future attempt needs a fundamentally different approach (much more
 # gradual scaling, or real price-response data from replays), not
 # another local-sweep-then-hope.
-LAND_COST_SEQUENCE = []
-LAND_CASH_RESERVE = 500
+LAND_COST_SEQUENCE = [1000, 2000, 4000]
 
 
 def is_ready_to_harvest(tile, day):
@@ -276,7 +246,10 @@ def is_fertilize_eligible(tile, day, fertilizer_n=0, for_purchase=False):
     if tile.get("fertilized_until_day", -1) != -1:
         return False  # already fertilized this lifecycle
     age = day - tile.get("planted_day", day)
-    return FERTILIZE_MIN_AGE <= age <= FERTILIZE_MAX_AGE
+    if crop == 'STRAWBERRY':
+        return age in (10, 12, 14)
+    w_min, w_max = FERTILIZE_WINDOW.get(crop, (99, 99))
+    return w_min <= age <= w_max
 
 
 def step_toward(pos, target):
@@ -356,7 +329,7 @@ def find_nearest_empty_tile(tiles, board_size, corner, skip=None):
 
 def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
                            animal, structure_kind, build_action, my_corner,
-                           other_animals=(), skip_tiles=None):
+                           other_animals=(), skip_tiles=None, unlocked_quadrants=None):
     """Decide a dedicated handler's action for an animal project this
     turn (goose/coop, cow/pasture, or sheep/pasture - same shape either
     way). Returns (action_list, market_order_or_None, is_busy,
@@ -401,7 +374,7 @@ def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
         # bought before any wheat has been harvested starves and escapes
         # within 2 days no matter what (see Day 13 decisions log).
         order = None
-        if (money - ANIMAL_CASH_RESERVE >= ANIMAL_COST[animal]
+        if (money - dynamic_cash_reserve(unlocked_quadrants) >= ANIMAL_COST[animal]
                 and shed.get("WHEAT", 0) >= WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE):
             order = ["BUY_ANIMAL", animal, 1]
         return (None, order, False, None)
@@ -490,7 +463,7 @@ def assign_targets(positions, tiers):
     return assignments
 
 
-def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_fertilizer, plant_counts):
+def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_fertilizer, plant_counts, unlocked_quadrants):
     x, y = pos
     tile = tiles[y][x]
 
@@ -507,7 +480,7 @@ def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_ferti
         return ["DIG"]
 
     if tile is None:
-        crop = choose_crop_to_plant(remaining_seeds, plant_counts)
+        crop = choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants)
         if crop is not None:
             remaining_seeds[crop] -= 1
             plant_counts[crop] = plant_counts.get(crop, 0) + 1
@@ -532,26 +505,21 @@ def count_plant_tiles_by_crop(tiles, board_size):
     return counts
 
 
-def choose_crop_to_plant(remaining_seeds, plant_counts):
-    """Which crop to plant on an empty tile this turn. Melon and
-    strawberry each get a guaranteed share instead of always losing out
-    to wheat/carrot, which stay restocked almost continuously - see
-    Day 14 decisions log for why melon was going unplanted without this.
-    But only once wheat has a foothold - claiming tiles before any
-    cash-generating crop exists starves early cash flow for the whole
-    10+ day cycle of a premium crop (also Day 14 decisions log)."""
+def choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants):
+    target_strawberry = get_strawberry_target(unlocked_quadrants)
+    target_melon = get_melon_target(unlocked_quadrants)
     wheat_established = plant_counts.get("WHEAT", 0) >= MIN_WHEAT_TILES_BEFORE_MELON
     if wheat_established:
-        if remaining_seeds.get("MELON", 0) > 0 and plant_counts.get("MELON", 0) < MELON_TILE_TARGET:
-            return "MELON"
-        if remaining_seeds.get("STRAWBERRY", 0) > 0 and plant_counts.get("STRAWBERRY", 0) < STRAWBERRY_TILE_TARGET:
+        if remaining_seeds.get("STRAWBERRY", 0) > 0 and plant_counts.get("STRAWBERRY", 0) < target_strawberry:
             return "STRAWBERRY"
+        if remaining_seeds.get("MELON", 0) > 0 and plant_counts.get("MELON", 0) < target_melon:
+            return "MELON"
     for crop in ("WHEAT", "CARROT"):
         if remaining_seeds.get(crop, 0) > 0:
             return crop
-    for crop in ("MELON", "STRAWBERRY"):
+    for crop in ("STRAWBERRY", "MELON"):
         if remaining_seeds.get(crop, 0) > 0:
-            return crop  # staples exhausted too - plant a premium crop anyway
+            return crop
     return None
 
 
@@ -648,8 +616,8 @@ def agent(obs):
     # --- buy seed for whichever crop we're out of, cheapest first ---
     for crop in CROP_PRIORITY:
         cost = CROP_SEED_COST[crop]
-        if seeds.get(crop, 0) == 0 and money - SEED_BUFFER >= cost:
-            affordable = int((money - SEED_BUFFER) // cost)
+        if seeds.get(crop, 0) == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= cost:
+            affordable = int((money - dynamic_cash_reserve(unlocked_quadrants)) // cost)
             buy_n = max(1, min(affordable, 10))
             market.append(["BUY_SEED", crop, buy_n])
             money -= buy_n * cost
@@ -671,7 +639,7 @@ def agent(obs):
     #     went unwatered and turned to weeds. Fertilizer only becomes
     #     usable starting the turn AFTER the purchase actually lands. ---
     fertilizer_n = shed.get("FERTILIZER", 0)
-    if fertilizer_n == 0 and money - FERTILIZER_CASH_RESERVE >= FERTILIZER_COST:
+    if fertilizer_n == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= FERTILIZER_COST:
         has_eligible_tile = any(
             isinstance(tiles[y][x], dict) and is_fertilize_eligible(tiles[y][x], day, for_purchase=True)
             for y in range(board_size) for x in range(board_size)
@@ -688,27 +656,30 @@ def agent(obs):
     #     count that only ever matched a single quadrant. ---
     hires_today = me.get("hires_today", 0)
     current_hands = len(me.get("hands", []))
-    hand_target = crop_target + ANIMAL_HANDLER_COUNT
-    if hour == 0:
-        while current_hands < hand_target and hires_today < len(HIRE_COST_SEQUENCE):
-            cost = HIRE_COST_SEQUENCE[hires_today]
-            if money - HAND_CASH_RESERVE < cost:
-                break
-            market.append(["HIRE"])
-            money -= cost
-            hires_today += 1
-            current_hands += 1
+    hand_target = total_hand_target(unlocked_quadrants)
+    # Allow hiring at any hour to bypass the 10 market orders/turn cap
+    while current_hands < hand_target and hires_today < len(HIRE_COST_SEQUENCE):
+        cost = HIRE_COST_SEQUENCE[hires_today]
+        if money < cost:
+            break
+        # Also respect the 10 market orders per turn limit ourselves so we don't truncate
+        if len(market) >= 9:
+            break
+        market.append(["HIRE"])
+        money -= cost
+        hires_today += 1
+        current_hands += 1
 
     # --- buy the NEXT quadrant only once labor is already fully scaled
     #     to match CURRENT land - each purchase must be "earned" by
     #     labor that's already proven it can keep up with what we have,
     #     not funded speculatively ahead of it. Day 11 lost money buying
     #     land without this gate; see decisions log. ---
-    if hour == 0 and current_hands >= hand_target:
+    if hour == 23 and current_hands >= hand_target:
         land_idx = len(unlocked_quadrants) - 1
         if 0 <= land_idx < len(LAND_COST_SEQUENCE):
             land_cost = LAND_COST_SEQUENCE[land_idx]
-            if money - LAND_CASH_RESERVE >= land_cost:
+            if money - dynamic_cash_reserve(unlocked_quadrants + ['DUMMY']) >= land_cost:
                 market.append(["BUY_LAND"])
                 money -= land_cost
 
@@ -772,7 +743,7 @@ def agent(obs):
             pos, tiles, board_size, money, shed, inv,
             animal=animal, structure_kind=structure_kind, build_action=build_action,
             my_corner=ANIMAL_CORNER[animal], other_animals=other_animals,
-            skip_tiles=build_targets_this_turn,
+            skip_tiles=build_targets_this_turn, unlocked_quadrants=unlocked_quadrants
         )
         if order:
             market.append(order)
@@ -804,7 +775,7 @@ def agent(obs):
     for list_i, unit_i in enumerate(crop_unit_indices):
         actions[unit_i] = decide_crop_action(
             positions[unit_i], tiles, day, remaining_seeds, assignments[list_i],
-            remaining_fertilizer, plant_counts,
+            remaining_fertilizer, plant_counts, unlocked_quadrants
         )
 
     for slot, action in handler_slots.items():
