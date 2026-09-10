@@ -104,44 +104,14 @@ STRAWBERRY_TILE_TARGET = 0  # TEMPORARILY disabled for isolation testing -
 # capped) share of tiles instead of leaving it to leftover priority -
 # modest allocation given melon's long 10-day cycle and the board's
 # limited 25 tiles.
-MELON_TILE_TARGET = 7
-# Day 20: raised from 3 to 5, real-engine CONFIRMED a genuine win
-# (+10.5%, $23,550 vs $21,315 baseline, reproduced identically twice).
-# Day 21: raised again to 7 - two consecutive confirmed wins in this
-# same direction (adding melon at all in Day 14, then 3->5 in Day 20)
-# earns a bit more confidence than a first guess would. Also re-ran the
-# CROP_HANDS_PER_QUADRANT sweep given the farm's composition has
-# changed a lot since Day 12's original tuning - 3 is still clearly
-# better than 4 at every melon target tested, so that stays unchanged.
-# Local sweep still climbs monotonically through 8+ (25,040 -> 35,530
-# for target 3->8) - deliberately NOT jumping straight to that ceiling.
-# Our own sell rate for melon is throttle-capped independent of tile
-# count (SELL_CAP_PER_TURN, price-aware since Day 17), which limits how
-# much more tiles actually increases glut exposure - more tiles mainly
-# means more upfront seed investment, not proportionally more selling
-# pressure. Still respecting that melon has the single steepest
-# glut-risk curve in the game (above_target 3.60) and flat pricing
-# can't see it crash - real-engine confirmation required before trusting
-# this or pushing further, same as every round.
-# Don't let melon claim tiles before wheat has a real foothold - a solo
-# farmer (or any short early stretch) planting melon FIRST, before any
-# wheat exists, starves cash flow for melon's whole 10-day cycle with
-# nothing else generating revenue in the meantime. Caught via the short
-# 10-day mock_harness test: money went to zero, HARVEST stayed at 0 the
-# entire run, because melon got prioritized on turn 1 before any wheat.
+MELON_TILE_TARGET = 9
+# Day 22: raised to 9 and enabling fertilizer for wheat/carrot using surplus.
+
 MIN_WHEAT_TILES_BEFORE_MELON = 2
 
-# Fertilizer ($100) is only worth it on melon. It doesn't raise melon's
-# yield cap (still 6) but reaches that cap at age 8 instead of age 10 -
-# 2 extra days of tile throughput per application, worth far more than
-# $100 across a season if several melon tiles are running. Wheat/carrot
-# are NOT included: fertilizing wheat only adds 2 yield units (~$40-50)
-# and carrot only 1 (~$35-40) - both less than the $100 cost, a real net
-# loss. Confirmed by hand-computing the economics before writing code,
-# not from testing (no local simulator models the harvest-yield formula
-# precisely enough to "discover" this - it's read directly off the spec
-# table's stated fertilized/unfertilized deltas).
 FERTILIZE_ELIGIBLE_CROPS = {"MELON"}
+SURPLUS_ELIGIBLE_CROPS = {"WHEAT", "CARROT"}
+FERTILIZER_SURPLUS_THRESHOLD = 10
 FERTILIZER_COST = 100
 FERTILIZER_CASH_RESERVE = 200
 # Apply fertilizer while still early in the bonus window (starts age 6)
@@ -293,10 +263,16 @@ def is_ready_to_harvest(tile, day):
     return tile.get("yield_units", 0) > 0 and age >= maturity
 
 
-def is_fertilize_eligible(tile, day):
+def is_fertilize_eligible(tile, day, fertilizer_n=0, for_purchase=False):
     crop = tile.get("crop")
-    if crop not in FERTILIZE_ELIGIBLE_CROPS:
-        return False
+    if for_purchase:
+        if crop not in FERTILIZE_ELIGIBLE_CROPS:
+            return False
+    else:
+        if crop not in FERTILIZE_ELIGIBLE_CROPS:
+            if crop not in SURPLUS_ELIGIBLE_CROPS or fertilizer_n <= FERTILIZER_SURPLUS_THRESHOLD:
+                return False
+
     if tile.get("fertilized_until_day", -1) != -1:
         return False  # already fertilized this lifecycle
     age = day - tile.get("planted_day", day)
@@ -463,7 +439,7 @@ def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
     return (["PASS"], None, True, None)
 
 
-def find_targets(tiles, board_size, day, seed_capacity, have_fertilizer):
+def find_targets(tiles, board_size, day, seed_capacity, fertilizer_n):
     """Scan owned (non-LOCKED) tiles for crop work. Returns FOUR SEPARATE
     priority tiers (water, harvest, fertilize, empty-to-plant) instead of
     one flattened list - assign_targets needs them separate to actually
@@ -483,7 +459,7 @@ def find_targets(tiles, board_size, day, seed_capacity, have_fertilizer):
                     water_targets.append((x, y))
                 elif is_ready_to_harvest(tile, day):
                     harvest_targets.append((x, y))
-                elif have_fertilizer and is_fertilize_eligible(tile, day):
+                elif fertilizer_n > 0 and is_fertilize_eligible(tile, day, fertilizer_n=fertilizer_n):
                     fertilize_targets.append((x, y))
             elif tile is None:
                 empty_targets.append((x, y))
@@ -514,7 +490,7 @@ def assign_targets(positions, tiers):
     return assignments
 
 
-def decide_crop_action(pos, tiles, day, remaining_seeds, target, have_fertilizer, remaining_fertilizer, plant_counts):
+def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_fertilizer, plant_counts):
     x, y = pos
     tile = tiles[y][x]
 
@@ -523,7 +499,7 @@ def decide_crop_action(pos, tiles, day, remaining_seeds, target, have_fertilizer
             return ["WATER"]
         if is_ready_to_harvest(tile, day):
             return ["HARVEST"]
-        if have_fertilizer and remaining_fertilizer[0] > 0 and is_fertilize_eligible(tile, day):
+        if remaining_fertilizer[0] > 0 and is_fertilize_eligible(tile, day, fertilizer_n=remaining_fertilizer[0]):
             remaining_fertilizer[0] -= 1
             return ["FERTILIZE"]
 
@@ -697,7 +673,7 @@ def agent(obs):
     fertilizer_n = shed.get("FERTILIZER", 0)
     if fertilizer_n == 0 and money - FERTILIZER_CASH_RESERVE >= FERTILIZER_COST:
         has_eligible_tile = any(
-            isinstance(tiles[y][x], dict) and is_fertilize_eligible(tiles[y][x], day)
+            isinstance(tiles[y][x], dict) and is_fertilize_eligible(tiles[y][x], day, for_purchase=True)
             for y in range(board_size) for x in range(board_size)
             if tiles[y][x] != "LOCKED"
         )
@@ -815,8 +791,7 @@ def agent(obs):
     crop_positions = [positions[i] for i in crop_unit_indices]
 
     seed_capacity = sum(seeds.values())
-    have_fertilizer = fertilizer_n > 0
-    targets = find_targets(tiles, board_size, day, seed_capacity, have_fertilizer)
+    targets = find_targets(tiles, board_size, day, seed_capacity, fertilizer_n)
     assignments = assign_targets(crop_positions, targets)
 
     remaining_seeds = dict(seeds)
@@ -829,7 +804,7 @@ def agent(obs):
     for list_i, unit_i in enumerate(crop_unit_indices):
         actions[unit_i] = decide_crop_action(
             positions[unit_i], tiles, day, remaining_seeds, assignments[list_i],
-            have_fertilizer, remaining_fertilizer, plant_counts,
+            remaining_fertilizer, plant_counts,
         )
 
     for slot, action in handler_slots.items():
