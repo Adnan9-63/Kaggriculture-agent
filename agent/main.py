@@ -82,7 +82,7 @@ MIN_WHEAT_TILES_BEFORE_MELON = 2
 
 FERTILIZE_ELIGIBLE_CROPS = {"MELON", "STRAWBERRY"}
 SURPLUS_ELIGIBLE_CROPS = {"WHEAT"}
-FERTILIZER_SURPLUS_THRESHOLD = 999
+FERTILIZER_SURPLUS_THRESHOLD = 10
 FERTILIZER_COST = 100
 FERTILIZER_CASH_RESERVE = 200
 
@@ -123,7 +123,7 @@ PRICE_RATIO_CRASHED = 0.40   # at/below this, price is already hurting -
                               # grinding it further toward the floor
 
 
-def dynamic_sell_quantity(available, current_price, item, base_cap=None):
+def dynamic_sell_quantity(available, current_price, item, day, base_cap=None):
     """How much of `item` to sell this turn, reacting to the ACTUAL
     current market price instead of a fixed guess. `base_cap` is the
     normal per-turn ceiling for throttled goods (None means normally
@@ -150,17 +150,19 @@ def dynamic_sell_quantity(available, current_price, item, base_cap=None):
     price_ratio = current_price / base_price
 
     if base_cap is None:
-        # Bulk-sell good (staple) - normally sell everything, but ease
-        # off if the price has already crashed well below base.
-        if price_ratio <= PRICE_RATIO_CRASHED:
+        if price_ratio <= 0.40:
             return min(available, max(1, available // 4))
         return available
 
-    # Throttled good - only ever reduce the cap, never raise it.
-    if price_ratio <= PRICE_RATIO_CRASHED:
+    if price_ratio <= 0.40:
         cap = max(0, base_cap // 2)
     else:
         cap = base_cap
+    
+    # Panic dump at the end of the game
+    if day >= 29:
+        cap = max(cap, 10) # 10 is the market order limit anyway
+        
     return min(available, cap)
 
 # Fibonacci-ish hire cost sequence, indexed by hires_today (0-indexed).
@@ -436,7 +438,7 @@ def find_targets(tiles, board_size, day, seed_capacity, fertilizer_n):
                     harvest_targets.append((x, y))
             elif tile is None:
                 empty_targets.append((x, y))
-    return [water_targets, fertilize_targets, harvest_targets, empty_targets[:seed_capacity]]
+    return [water_targets, fertilize_targets[:fertilizer_n], harvest_targets, empty_targets[:seed_capacity]]
 
 
 def assign_targets(positions, tiers):
@@ -480,7 +482,7 @@ def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_ferti
         return ["DIG"]
 
     if tile is None:
-        crop = choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants)
+        crop = choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants, day)
         if crop is not None:
             remaining_seeds[crop] -= 1
             plant_counts[crop] = plant_counts.get(crop, 0) + 1
@@ -505,19 +507,31 @@ def count_plant_tiles_by_crop(tiles, board_size):
     return counts
 
 
-def choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants):
+def choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants, day):
     target_strawberry = get_strawberry_target(unlocked_quadrants)
     target_melon = get_melon_target(unlocked_quadrants)
     wheat_established = plant_counts.get("WHEAT", 0) >= MIN_WHEAT_TILES_BEFORE_MELON
+    
+    # Do not plant crops if they won't mature before the end of the 30-day season (day 29 is the last day)
+    # Strawberry: 10 days. Melon: 8 days. Carrot: 3 days. Wheat: 4 days.
+    can_plant_strawberry = day <= 19
+    can_plant_melon = day <= 21
+    can_plant_wheat = day <= 25
+    can_plant_carrot = day <= 26
+
     if wheat_established:
-        if remaining_seeds.get("STRAWBERRY", 0) > 0 and plant_counts.get("STRAWBERRY", 0) < target_strawberry:
+        if can_plant_strawberry and remaining_seeds.get("STRAWBERRY", 0) > 0 and plant_counts.get("STRAWBERRY", 0) < target_strawberry:
             return "STRAWBERRY"
-        if remaining_seeds.get("MELON", 0) > 0 and plant_counts.get("MELON", 0) < target_melon:
+        if can_plant_melon and remaining_seeds.get("MELON", 0) > 0 and plant_counts.get("MELON", 0) < target_melon:
             return "MELON"
     for crop in ("WHEAT", "CARROT"):
+        if (crop == "WHEAT" and not can_plant_wheat) or (crop == "CARROT" and not can_plant_carrot):
+            continue
         if remaining_seeds.get(crop, 0) > 0:
             return crop
     for crop in ("STRAWBERRY", "MELON"):
+        if (crop == "STRAWBERRY" and not can_plant_strawberry) or (crop == "MELON" and not can_plant_melon):
+            continue
         if remaining_seeds.get(crop, 0) > 0:
             return crop
     return None
@@ -598,7 +612,7 @@ def agent(obs):
         if item == "WHEAT":
             n = max(0, n - wheat_reserve)
         if n > 0:
-            sell_n = dynamic_sell_quantity(n, market_prices.get(item, BASE_PRICE.get(item, 0)), item)
+            sell_n = dynamic_sell_quantity(n, market_prices.get(item, BASE_PRICE.get(item, 0)), item, day=day)
             if sell_n > 0:
                 market.append(["SELL", item, sell_n])
     # Generalized throttled sell for every high-glut-risk good (was
@@ -609,12 +623,21 @@ def agent(obs):
     for item, cap in SELL_CAP_PER_TURN.items():
         n = shed.get(item, 0)
         if n > 0:
-            sell_n = dynamic_sell_quantity(n, market_prices.get(item, BASE_PRICE.get(item, 0)), item, base_cap=cap)
+            sell_n = dynamic_sell_quantity(n, market_prices.get(item, BASE_PRICE.get(item, 0)), item, day=day, base_cap=cap)
             if sell_n > 0:
                 market.append(["SELL", item, sell_n])
 
     # --- buy seed for whichever crop we're out of, cheapest first ---
+    # Do not buy crops if they won't mature before the end of the 30-day season (day 29 is the last day)
+    can_plant_for_buy = {
+        "STRAWBERRY": day <= 19,
+        "MELON": day <= 21,
+        "WHEAT": day <= 25,
+        "CARROT": day <= 26
+    }
     for crop in CROP_PRIORITY:
+        if not can_plant_for_buy.get(crop, False):
+            continue
         cost = CROP_SEED_COST[crop]
         if seeds.get(crop, 0) == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= cost:
             affordable = int((money - dynamic_cash_reserve(unlocked_quadrants)) // cost)
@@ -638,21 +661,9 @@ def agent(obs):
     #     tile for 19 consecutive turns while everything else it owned
     #     went unwatered and turned to weeds. Fertilizer only becomes
     #     usable starting the turn AFTER the purchase actually lands. ---
-    fertilizer_n = shed.get("FERTILIZER", 0)
-    # Buy fertilizer in bulk if we have eligible tiles and cash
-    if money - dynamic_cash_reserve(unlocked_quadrants) >= FERTILIZER_COST:
-        eligible_count = sum(
-            1 for y in range(board_size) for x in range(board_size)
-            if isinstance(tiles[y][x], dict) and is_fertilize_eligible(tiles[y][x], day, for_purchase=True)
-        )
-        # Always maintain a slight surplus so hands don't wait empty-handed
-        needed = max(0, eligible_count + 2 - fertilizer_n)
-        if needed > 0:
-            affordable = int((money - dynamic_cash_reserve(unlocked_quadrants)) // FERTILIZER_COST)
-            buy_count = min(needed, affordable, 10)
-            if buy_count > 0:
-                market.append(["BUY_PRODUCT", "FERTILIZER", buy_count])
-                money -= buy_count * FERTILIZER_COST
+    if shed.get("FERTILIZER", 0) == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= FERTILIZER_COST:
+        market.append(["BUY_PRODUCT", "FERTILIZER", 1])
+        money -= FERTILIZER_COST
 
     # --- hire hands at the start of the day if we can afford it. Target
     #     scales with owned land (crop_target = crop_hand_target(...))
@@ -661,6 +672,17 @@ def agent(obs):
     #     count that only ever matched a single quadrant. ---
     hires_today = me.get("hires_today", 0)
     current_hands = len(me.get("hands", []))
+    # Calculate actual work waiting today to scale labor down during winter
+    today_work_items = 0
+    for y in range(board_size):
+        for x in range(board_size):
+            tile = tiles[y][x]
+            if isinstance(tile, dict) and tile.get("kind") == "PLANT":
+                # Count if ready to harvest OR eligible for fertilizer (even if we don't have fertilizer yet,
+                # because we will likely buy it this turn)
+                if is_ready_to_harvest(tile, day) or is_fertilize_eligible(tile, day, for_purchase=True):
+                    today_work_items += 1
+
     hand_target = total_hand_target(unlocked_quadrants)
     # Allow hiring at any hour to bypass the 10 market orders/turn cap
     while current_hands < hand_target and hires_today < len(HIRE_COST_SEQUENCE):
@@ -769,6 +791,7 @@ def agent(obs):
     crop_positions = [positions[i] for i in crop_unit_indices]
 
     seed_capacity = sum(seeds.values())
+    fertilizer_n = shed.get("FERTILIZER", 0)
     targets = find_targets(tiles, board_size, day, seed_capacity, fertilizer_n)
     assignments = assign_targets(crop_positions, targets)
 
