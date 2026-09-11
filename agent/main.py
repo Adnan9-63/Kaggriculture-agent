@@ -647,15 +647,20 @@ def agent(obs):
     #     went unwatered and turned to weeds. Fertilizer only becomes
     #     usable starting the turn AFTER the purchase actually lands. ---
     fertilizer_n = shed.get("FERTILIZER", 0)
-    if fertilizer_n == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= FERTILIZER_COST:
-        has_eligible_tile = any(
-            isinstance(tiles[y][x], dict) and is_fertilize_eligible(tiles[y][x], day, for_purchase=True)
-            for y in range(board_size) for x in range(board_size)
-            if tiles[y][x] != "LOCKED"
+    # Buy fertilizer in bulk if we have eligible tiles and cash
+    if money - dynamic_cash_reserve(unlocked_quadrants) >= FERTILIZER_COST:
+        eligible_count = sum(
+            1 for y in range(board_size) for x in range(board_size)
+            if isinstance(tiles[y][x], dict) and is_fertilize_eligible(tiles[y][x], day, for_purchase=True)
         )
-        if has_eligible_tile:
-            market.append(["BUY_PRODUCT", "FERTILIZER", 1])
-            money -= FERTILIZER_COST
+        # Always maintain a slight surplus so hands don't wait empty-handed
+        needed = max(0, eligible_count + FERTILIZER_SURPLUS_THRESHOLD - fertilizer_n)
+        if needed > 0:
+            affordable = int((money - dynamic_cash_reserve(unlocked_quadrants)) // FERTILIZER_COST)
+            buy_count = min(needed, affordable, 10)
+            if buy_count > 0:
+                market.append(["BUY_PRODUCT", "FERTILIZER", buy_count])
+                money -= buy_count * FERTILIZER_COST
 
     # --- hire hands at the start of the day if we can afford it. Target
     #     scales with owned land (crop_target = crop_hand_target(...))
