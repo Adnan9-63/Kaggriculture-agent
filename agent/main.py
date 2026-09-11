@@ -49,8 +49,12 @@ def total_hand_target(unlocked_quadrants):
     return min(13, crop_hand_target(unlocked_quadrants) + ANIMAL_HANDLER_COUNT)
 
 def dynamic_cash_reserve(unlocked_quadrants):
-    hand_target = total_hand_target(unlocked_quadrants)
-    return sum(HIRE_COST_SEQUENCE[:hand_target]) + 100
+    # We MUST hold back 2 days of wages because STRAWBERRY yields every 2 days.
+    # If we only hold back 1 day, we pay today's wages, start tomorrow with $0,
+    # earn $0 (off-day), and all workers escape at the end of the day!
+    target = min(13, total_hand_target(unlocked_quadrants))
+    cost = sum(HIRE_COST_SEQUENCE[:target])
+    return (cost * 2) + 100
 
 CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80, "STRAWBERRY": 100}
 CROP_MATURITY_DAY = {"WHEAT": 4, "CARROT": 3, "MELON": 10, "STRAWBERRY": 10}
@@ -684,7 +688,11 @@ def agent(obs):
         land_idx = len(unlocked_quadrants) - 1
         if 0 <= land_idx < len(LAND_COST_SEQUENCE):
             land_cost = LAND_COST_SEQUENCE[land_idx]
-            if money - dynamic_cash_reserve(unlocked_quadrants + ['DUMMY']) >= land_cost:
+            # We must hold back BOTH today's wages (since they haven't been deducted yet)
+            # AND tomorrow's new, higher wages, to mathematically guarantee we can
+            # afford the expanded workforce without instantly bankrupting tomorrow.
+            required_reserve = dynamic_cash_reserve(unlocked_quadrants) + dynamic_cash_reserve(unlocked_quadrants + ["DUMMY"])
+            if money - required_reserve >= land_cost:
                 market.append(["BUY_LAND"])
                 money -= land_cost
 
