@@ -45,17 +45,8 @@ ANIMAL_HANDLER_COUNT = 3
 def crop_hand_target(unlocked_quadrants):
     return CROP_HANDS_PER_QUADRANT * max(1, len(unlocked_quadrants))
 
-def total_hand_target(unlocked_quadrants, today_work_items=None):
-    # Base minimum hands: 1 farmer + animal handlers + enough hands to simply water the crops
-    # 24 actions per hand per day. 25 crops per quadrant = ~1 hand per quadrant needed just for watering.
-    base = 1 + ANIMAL_HANDLER_COUNT + len(unlocked_quadrants)
-    if today_work_items is None:
-        return min(13, base)
-    
-    # Scale up dynamically if there's actual work (harvest/fertilize)
-    # Assume each hand can comfortably do ~15 useful work actions (accounting for movement)
-    needed = base + (today_work_items // 15)
-    return min(13, needed)
+def total_hand_target(unlocked_quadrants):
+    return min(13, crop_hand_target(unlocked_quadrants) + ANIMAL_HANDLER_COUNT)
 
 def dynamic_cash_reserve(unlocked_quadrants):
     # We MUST hold back 2 days of wages because STRAWBERRY yields every 2 days.
