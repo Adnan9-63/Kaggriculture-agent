@@ -156,14 +156,6 @@ def dynamic_sell_quantity(available, current_price, item, base_cap=None):
             return min(available, max(1, available // 4))
         return available
 
-    # Inventory emergency override: if we are hoarding massive amounts,
-    # we MUST sell faster than the base cap or we physically can't clear
-    # the shed before the game ends, wasting thousands of dollars.
-    if available >= 40:
-        base_cap = base_cap * 3
-    elif available >= 20:
-        base_cap = base_cap * 2
-
     # Throttled good - only ever reduce the cap, never raise it.
     if price_ratio <= PRICE_RATIO_CRASHED:
         cap = max(0, base_cap // 2)
