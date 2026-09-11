@@ -82,7 +82,7 @@ MIN_WHEAT_TILES_BEFORE_MELON = 2
 
 FERTILIZE_ELIGIBLE_CROPS = {"MELON", "STRAWBERRY"}
 SURPLUS_ELIGIBLE_CROPS = {"WHEAT"}
-FERTILIZER_SURPLUS_THRESHOLD = 10
+FERTILIZER_SURPLUS_THRESHOLD = 999
 FERTILIZER_COST = 100
 FERTILIZER_CASH_RESERVE = 200
 
@@ -654,7 +654,7 @@ def agent(obs):
             if isinstance(tiles[y][x], dict) and is_fertilize_eligible(tiles[y][x], day, for_purchase=True)
         )
         # Always maintain a slight surplus so hands don't wait empty-handed
-        needed = max(0, eligible_count + FERTILIZER_SURPLUS_THRESHOLD - fertilizer_n)
+        needed = max(0, eligible_count + 2 - fertilizer_n)
         if needed > 0:
             affordable = int((money - dynamic_cash_reserve(unlocked_quadrants)) // FERTILIZER_COST)
             buy_count = min(needed, affordable, 10)
