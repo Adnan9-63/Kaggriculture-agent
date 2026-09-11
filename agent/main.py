@@ -438,13 +438,13 @@ def find_targets(tiles, board_size, day, seed_capacity, fertilizer_n):
             if isinstance(tile, dict) and tile.get("kind") == "PLANT":
                 if not tile.get("watered_today"):
                     water_targets.append((x, y))
-                elif is_ready_to_harvest(tile, day):
-                    harvest_targets.append((x, y))
                 elif fertilizer_n > 0 and is_fertilize_eligible(tile, day, fertilizer_n=fertilizer_n):
                     fertilize_targets.append((x, y))
+                elif is_ready_to_harvest(tile, day):
+                    harvest_targets.append((x, y))
             elif tile is None:
                 empty_targets.append((x, y))
-    return [water_targets, harvest_targets, fertilize_targets, empty_targets[:seed_capacity]]
+    return [water_targets, fertilize_targets, harvest_targets, empty_targets[:seed_capacity]]
 
 
 def assign_targets(positions, tiers):
@@ -478,11 +478,11 @@ def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_ferti
     if isinstance(tile, dict) and tile.get("kind") == "PLANT":
         if not tile.get("watered_today"):
             return ["WATER"]
-        if is_ready_to_harvest(tile, day):
-            return ["HARVEST"]
         if remaining_fertilizer[0] > 0 and is_fertilize_eligible(tile, day, fertilizer_n=remaining_fertilizer[0]):
             remaining_fertilizer[0] -= 1
             return ["FERTILIZE"]
+        if is_ready_to_harvest(tile, day):
+            return ["HARVEST"]
 
     if isinstance(tile, dict) and tile.get("kind") == "WEED":
         return ["DIG"]
