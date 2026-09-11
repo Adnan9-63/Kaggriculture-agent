@@ -760,6 +760,8 @@ def agent(obs):
         )
         if order:
             market.append(order)
+            if order[0] == "BUY_ANIMAL":
+                money -= ANIMAL_COST[order[1]]
         if build_target:
             build_targets_this_turn.append(build_target)
         if busy:
