@@ -53,7 +53,8 @@ def main():
         prices = market.get("prices", {})
         print(f"{day_i:>4} {me.get('money', '?'):>10} {opp.get('money', '?'):>10} "
               f"{len(me.get('hands', [])):>6} "
-              f"{prices.get('WHEAT', '?'):>7} {prices.get('CARROT', '?'):>7} {prices.get('EGG', '?'):>7}")
+              f"{prices.get('WHEAT', '?'):>7} {prices.get('CARROT', '?'):>7} {prices.get('EGG', '?'):>7} "
+              f"{len(me.get('unlocked_quadrants', []))}")
 
     final = steps[-1]
     print("\nFinal:")

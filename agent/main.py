@@ -419,11 +419,19 @@ def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
     if not needs_attention:
         return (None, None, False, None)
 
+    needs_feed = not structure_tile.get("fed_today")
+    if needs_feed and my_inventory.get("WHEAT", 0) == 0:
+        target = nearest(pos, shed_adjacent_positions(board_size))
+        if tuple(pos) == target:
+            return (["PICKUP", "WHEAT", 1], None, True, None)
+        move = step_toward(pos, target)
+        return ([move] if move else ["PASS"], None, True, None)
+
     if tuple(pos) != structure_pos:
         move = step_toward(pos, structure_pos)
         return ([move] if move else ["PASS"], None, True, None)
 
-    if not structure_tile.get("fed_today"):
+    if needs_feed:
         return (["FEED"], None, True, None)
     if structure_tile.get("yield_units", 0) > 0:
         return (["HARVEST"], None, True, None)

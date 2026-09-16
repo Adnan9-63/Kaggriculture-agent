@@ -240,12 +240,12 @@ def run(turns=720, verbose=True, label=""):
                     wasted_turns += 1
             elif act == "FEED":
                 if isinstance(tile, dict) and tile.get("kind") in ("COOP", "PASTURE") and tile.get("animal"):
-                    if shed.get("WHEAT", 0) >= 1:
-                        shed["WHEAT"] -= 1
+                    inv = inventories[i] if i < len(inventories) else {}
+                    if inv.get("WHEAT", 0) >= 1:
+                        inv["WHEAT"] -= 1
                         tile["fed_today"] = True
                     # else: FEED attempted but no wheat available - fails,
                     # fed_today stays False, matching the real spec
-                    # ("FEED - Feed an animal using wheat")
                 else:
                     wasted_turns += 1
             elif act == "CARE":
