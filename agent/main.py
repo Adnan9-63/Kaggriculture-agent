@@ -629,7 +629,7 @@ def agent(obs):
         wheat_reserve += WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE
     market_prices = obs.get("market", {}).get("prices", {})
 
-    for item in ("WHEAT", "CARROT", "EGG"):
+    for item in ("WHEAT", "CARROT", "EGG", "FERTILIZER"):
         n = shed.get(item, 0)
         if item == "WHEAT":
             n = max(0, n - wheat_reserve)
