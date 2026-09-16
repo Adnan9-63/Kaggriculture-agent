@@ -43,7 +43,7 @@ CROP_HANDS_PER_QUADRANT = 3
 ANIMAL_HANDLER_COUNT = 3
 
 def crop_hand_target(unlocked_quadrants):
-    return CROP_HANDS_PER_QUADRANT * max(1, len(unlocked_quadrants))
+    return min(10, CROP_HANDS_PER_QUADRANT * max(1, len(unlocked_quadrants)))
 
 def total_hand_target(unlocked_quadrants):
     return min(13, crop_hand_target(unlocked_quadrants) + ANIMAL_HANDLER_COUNT)
