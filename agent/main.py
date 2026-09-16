@@ -633,6 +633,8 @@ def agent(obs):
         n = shed.get(item, 0)
         if item == "WHEAT":
             n = max(0, n - wheat_reserve)
+        elif item == "FERTILIZER":
+            n = max(0, n - FERTILIZER_SURPLUS_THRESHOLD)
         if n > 0:
             sell_n = dynamic_sell_quantity(n, market_prices.get(item, BASE_PRICE.get(item, 0)), item, day=day)
             if sell_n > 0:
