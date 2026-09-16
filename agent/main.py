@@ -72,11 +72,25 @@ CROP_PRIORITY = ["WHEAT", "STRAWBERRY", "MELON"]  # STRAWBERRY temporarily
 ONE_TIME_CROPS = {"WHEAT", "CARROT", "MELON"}
 ONGOING_CROP_SCHEDULE = {"STRAWBERRY": (10, 12, 14, 16)}
 
-def get_strawberry_target(unlocked_quadrants):
-    return 10 * max(1, len(unlocked_quadrants))
+def get_strawberry_target(unlocked_quadrants, prices):
+    
+    target = 10
+    if prices.get("STRAWBERRY", 120) < 50:
+        target = 2
+    elif prices.get("STRAWBERRY", 120) > 150:
+        target = 15
+    return target * max(1, len(unlocked_quadrants))
 
-def get_melon_target(unlocked_quadrants):
-    return 5 * max(1, len(unlocked_quadrants))
+
+def get_melon_target(unlocked_quadrants, prices):
+    
+    target = 5
+    if prices.get("MELON", 250) < 100:
+        target = 1
+    elif prices.get("MELON", 250) > 300:
+        target = 8
+    return target * max(1, len(unlocked_quadrants))
+
 
 MIN_WHEAT_TILES_BEFORE_MELON = 2
 
@@ -150,11 +164,15 @@ def dynamic_sell_quantity(available, current_price, item, day, base_cap=None):
     price_ratio = current_price / base_price
 
     if base_cap is None:
-        if price_ratio <= 0.40:
+        if price_ratio <= 0.30:
+            return 0  # Hold for recovery
+        if price_ratio <= 0.50:
             return min(available, max(1, available // 4))
         return available
 
-    if price_ratio <= 0.40:
+    if price_ratio <= 0.30:
+        cap = 0  # Hold for recovery
+    elif price_ratio <= 0.50:
         cap = max(0, base_cap // 2)
     else:
         cap = base_cap
@@ -162,6 +180,8 @@ def dynamic_sell_quantity(available, current_price, item, day, base_cap=None):
     # Panic dump at the end of the game
     if day >= 29:
         cap = max(cap, 10) # 10 is the market order limit anyway
+        if cap == 0:
+            cap = 10
         
     return min(available, cap)
 
@@ -465,7 +485,8 @@ def assign_targets(positions, tiers):
     return assignments
 
 
-def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_fertilizer, plant_counts, unlocked_quadrants):
+def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_fertilizer, plant_counts, 
+unlocked_quadrants, market_prices):
     x, y = pos
     tile = tiles[y][x]
 
@@ -482,7 +503,7 @@ def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_ferti
         return ["DIG"]
 
     if tile is None:
-        crop = choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants, day)
+        crop = choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants, day, market_prices)
         if crop is not None:
             remaining_seeds[crop] -= 1
             plant_counts[crop] = plant_counts.get(crop, 0) + 1
@@ -507,9 +528,9 @@ def count_plant_tiles_by_crop(tiles, board_size):
     return counts
 
 
-def choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants, day):
-    target_strawberry = get_strawberry_target(unlocked_quadrants)
-    target_melon = get_melon_target(unlocked_quadrants)
+def choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants, day, prices):
+    target_strawberry = get_strawberry_target(unlocked_quadrants, prices)
+    target_melon = get_melon_target(unlocked_quadrants, prices)
     wheat_established = plant_counts.get("WHEAT", 0) >= MIN_WHEAT_TILES_BEFORE_MELON
     
     # Do not plant crops if they won't mature before the end of the 30-day season (day 29 is the last day)
@@ -571,6 +592,7 @@ def agent(obs):
     private = obs["private"]
     tiles = me["tiles"]
     board_size = len(tiles)
+    plant_counts = count_plant_tiles_by_crop(tiles, board_size)
 
     money = me["money"]
     seeds = dict(private["seeds"])
@@ -638,6 +660,16 @@ def agent(obs):
     for crop in CROP_PRIORITY:
         if not can_plant_for_buy.get(crop, False):
             continue
+            
+        target = float('inf')
+        if crop == "STRAWBERRY":
+            target = get_strawberry_target(unlocked_quadrants, market_prices)
+        elif crop == "MELON":
+            target = get_melon_target(unlocked_quadrants, market_prices)
+            
+        if plant_counts.get(crop, 0) + seeds.get(crop, 0) >= target:
+            continue
+            
         cost = CROP_SEED_COST[crop]
         if seeds.get(crop, 0) == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= cost:
             affordable = int((money - dynamic_cash_reserve(unlocked_quadrants)) // cost)
@@ -800,12 +832,11 @@ def agent(obs):
                                             # across units so a second unit
                                             # can't apply fertilizer we no
                                             # longer have this turn
-    plant_counts = count_plant_tiles_by_crop(tiles, board_size)
     actions = [None] * len(positions)
     for list_i, unit_i in enumerate(crop_unit_indices):
         actions[unit_i] = decide_crop_action(
             positions[unit_i], tiles, day, remaining_seeds, assignments[list_i],
-            remaining_fertilizer, plant_counts, unlocked_quadrants
+            remaining_fertilizer, plant_counts, unlocked_quadrants, market_prices
         )
 
     for slot, action in handler_slots.items():
