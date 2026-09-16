@@ -693,9 +693,10 @@ def agent(obs):
     #     tile for 19 consecutive turns while everything else it owned
     #     went unwatered and turned to weeds. Fertilizer only becomes
     #     usable starting the turn AFTER the purchase actually lands. ---
-    if shed.get("FERTILIZER", 0) == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= FERTILIZER_COST:
+    fertilizer_cost = market_prices.get("FERTILIZER", FERTILIZER_COST)
+    if shed.get("FERTILIZER", 0) == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= fertilizer_cost:
         market.append(["BUY_PRODUCT", "FERTILIZER", 1])
-        money -= FERTILIZER_COST
+        money -= fertilizer_cost
 
     # --- hire hands at the start of the day if we can afford it. Target
     #     scales with owned land (crop_target = crop_hand_target(...))
