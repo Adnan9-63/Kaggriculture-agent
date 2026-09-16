@@ -623,9 +623,9 @@ def agent(obs):
     # handler - no point withholding wheat for an animal that has no
     # chance of being bought yet (e.g. solo farmer, early game).
     animal_count = count_placed_animals(tiles, board_size)
-    have_handler_capacity = len(me.get("hands", [])) > crop_target
+    have_handler_capacity = total_hand_target(unlocked_quadrants) > crop_target
     wheat_reserve = WHEAT_FEED_RESERVE_PER_ANIMAL * animal_count
-    if have_handler_capacity:
+    if have_handler_capacity and (len(unlocked_quadrants) >= 3 or animal_count > 0):
         wheat_reserve += WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE
     market_prices = obs.get("market", {}).get("prices", {})
 
