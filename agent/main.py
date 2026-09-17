@@ -351,7 +351,8 @@ def find_nearest_empty_tile(tiles, board_size, corner, skip=None):
 
 def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
                            animal, structure_kind, build_action, my_corner,
-                           other_animals=(), skip_tiles=None, unlocked_quadrants=None):
+                           other_animals=(), skip_tiles=None, unlocked_quadrants=None,
+                           can_buy_animal=True, total_owned_animals=0):
     """Decide a dedicated handler's action for an animal project this
     turn (goose/coop, cow/pasture, or sheep/pasture - same shape either
     way). Returns (action_list, market_order_or_None, is_busy,
@@ -396,8 +397,8 @@ def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
         # bought before any wheat has been harvested starves and escapes
         # within 2 days no matter what (see Day 13 decisions log).
         order = None
-        if (money - dynamic_cash_reserve(unlocked_quadrants) >= ANIMAL_COST[animal]
-                and shed.get("WHEAT", 0) >= WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE):
+        if (can_buy_animal and money - dynamic_cash_reserve(unlocked_quadrants) >= ANIMAL_COST[animal]
+                and shed.get("WHEAT", 0) >= WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE + (total_owned_animals * 5)):
             order = ["BUY_ANIMAL", animal, 1]
         return (None, order, False, None)
 
@@ -630,10 +631,15 @@ def agent(obs):
     # the purchase buffer once there's actually hand capacity for a
     # handler - no point withholding wheat for an animal that has no
     # chance of being bought yet (e.g. solo farmer, early game).
-    animal_count = count_placed_animals(tiles, board_size)
+    total_owned_animals = count_placed_animals(tiles, board_size)
+    for kind in ("GOOSE", "COW", "SHEEP"):
+        total_owned_animals += shed.get(kind, 0)
+        for inv in private.get("inventories", []):
+            total_owned_animals += inv.get(kind, 0)
+
     have_handler_capacity = total_hand_target(unlocked_quadrants) > crop_target
-    wheat_reserve = WHEAT_FEED_RESERVE_PER_ANIMAL * animal_count
-    if have_handler_capacity and (len(unlocked_quadrants) >= 3 or animal_count > 0):
+    wheat_reserve = WHEAT_FEED_RESERVE_PER_ANIMAL * total_owned_animals
+    if have_handler_capacity and (len(unlocked_quadrants) >= 3 or total_owned_animals > 0):
         wheat_reserve += WHEAT_BUFFER_BEFORE_ANIMAL_PURCHASE
     market_prices = obs.get("market", {}).get("prices", {})
 
@@ -804,6 +810,7 @@ def agent(obs):
         (sheep_slot, "SHEEP", "PASTURE", "BUILD_PASTURE", ("COW",)),
     ]
 
+    bought_animal_this_turn = False
     for slot, animal, structure_kind, build_action, other_animals in ANIMAL_HANDLERS:
         if slot is None or len(positions) <= slot:
             continue
@@ -813,12 +820,16 @@ def agent(obs):
             pos, tiles, board_size, money, shed, inv,
             animal=animal, structure_kind=structure_kind, build_action=build_action,
             my_corner=ANIMAL_CORNER[animal], other_animals=other_animals,
-            skip_tiles=build_targets_this_turn, unlocked_quadrants=unlocked_quadrants
+            skip_tiles=build_targets_this_turn, unlocked_quadrants=unlocked_quadrants,
+            can_buy_animal=not bought_animal_this_turn,
+            total_owned_animals=total_owned_animals
         )
         if order:
             market.append(order)
             if order[0] == "BUY_ANIMAL":
                 money -= ANIMAL_COST[order[1]]
+                bought_animal_this_turn = True
+                total_owned_animals += 1
         if build_target:
             build_targets_this_turn.append(build_target)
         if busy:
