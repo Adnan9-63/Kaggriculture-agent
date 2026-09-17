@@ -192,9 +192,11 @@ def run(turns=720, verbose=True, label=""):
                 else:
                     wasted_turns += 1
             elif act == "FERTILIZE":
-                if isinstance(tile, dict) and tile.get("kind") == "PLANT" and shed.get("FERTILIZER", 0) >= 1:
-                    shed["FERTILIZER"] -= 1
-                    tile["fertilized_until_day"] = day + 3
+                if isinstance(tile, dict) and tile.get("kind") == "PLANT":
+                    inv = inventories[i] if i < len(inventories) else {}
+                    if inv.get("FERTILIZER", 0) >= 1:
+                        inv["FERTILIZER"] -= 1
+                        tile["fertilized_until_day"] = day + 3
                 else:
                     wasted_turns += 1
             elif act == "DIG":

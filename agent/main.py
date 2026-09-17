@@ -54,7 +54,7 @@ def dynamic_cash_reserve(unlocked_quadrants):
 
 CROP_SEED_COST = {"WHEAT": 10, "CARROT": 20, "MELON": 80, "STRAWBERRY": 100}
 CROP_MATURITY_DAY = {"WHEAT": 4, "CARROT": 3, "MELON": 10, "STRAWBERRY": 10}
-CROP_PRIORITY = ["WHEAT", "STRAWBERRY", "MELON"]  # STRAWBERRY temporarily
+CROP_PRIORITY = ["STRAWBERRY", "MELON", "CARROT", "WHEAT"]
 # removed for isolation testing (see STRAWBERRY_TILE_TARGET above) -
 # excluded here too so seed-buying never touches it either, for a
 # clean test. Restore "STRAWBERRY" to this list once isolated.
@@ -92,11 +92,20 @@ def get_melon_target(unlocked_quadrants, prices):
     return target * max(1, len(unlocked_quadrants))
 
 
+def get_carrot_target(unlocked_quadrants, prices):
+    target = 10
+    if prices.get("CARROT", 35) > 40:
+        target = 20
+    elif prices.get("CARROT", 35) < 25:
+        target = 5
+    return target * max(1, len(unlocked_quadrants))
+
+
 MIN_WHEAT_TILES_BEFORE_MELON = 2
 
 FERTILIZE_ELIGIBLE_CROPS = {"MELON", "STRAWBERRY"}
 SURPLUS_ELIGIBLE_CROPS = set()
-FERTILIZER_SURPLUS_THRESHOLD = 10
+FERTILIZER_SURPLUS_THRESHOLD = 0
 FERTILIZER_COST = 100
 FERTILIZER_CASH_RESERVE = 200
 
@@ -443,7 +452,7 @@ def animal_handler_action(pos, tiles, board_size, money, shed, my_inventory,
     return (["PASS"], None, True, None)
 
 
-def find_targets(tiles, board_size, day, seed_capacity, fertilizer_n):
+def find_targets(tiles, board_size, day, seed_capacity):
     """Scan owned (non-LOCKED) tiles for crop work. Returns FOUR SEPARATE
     priority tiers (water, harvest, fertilize, empty-to-plant) instead of
     one flattened list - assign_targets needs them separate to actually
@@ -452,7 +461,7 @@ def find_targets(tiles, board_size, day, seed_capacity, fertilizer_n):
     this caused: a single farmer got pulled to nearby harvest-ready
     tiles while farther-away tiles went unwatered long enough to turn
     into weeds)."""
-    water_targets, harvest_targets, fertilize_targets, empty_targets = [], [], [], []
+    water_targets, harvest_targets, empty_targets = [], [], []
     for y in range(board_size):
         for x in range(board_size):
             tile = tiles[y][x]
@@ -461,13 +470,11 @@ def find_targets(tiles, board_size, day, seed_capacity, fertilizer_n):
             if isinstance(tile, dict) and tile.get("kind") == "PLANT":
                 if not tile.get("watered_today"):
                     water_targets.append((x, y))
-                elif fertilizer_n > 0 and is_fertilize_eligible(tile, day, fertilizer_n=fertilizer_n):
-                    fertilize_targets.append((x, y))
                 elif is_ready_to_harvest(tile, day):
                     harvest_targets.append((x, y))
             elif tile is None:
                 empty_targets.append((x, y))
-    return [water_targets, fertilize_targets[:fertilizer_n], harvest_targets, empty_targets[:seed_capacity]]
+    return [water_targets, harvest_targets, empty_targets[:seed_capacity]]
 
 
 def assign_targets(positions, tiers):
@@ -494,17 +501,13 @@ def assign_targets(positions, tiers):
     return assignments
 
 
-def decide_crop_action(pos, tiles, day, remaining_seeds, target, remaining_fertilizer, plant_counts, 
-unlocked_quadrants, market_prices):
+def decide_crop_action(pos, tiles, day, remaining_seeds, target, plant_counts, unlocked_quadrants, market_prices):
     x, y = pos
     tile = tiles[y][x]
 
     if isinstance(tile, dict) and tile.get("kind") == "PLANT":
         if not tile.get("watered_today"):
             return ["WATER"]
-        if remaining_fertilizer[0] > 0 and is_fertilize_eligible(tile, day, fertilizer_n=remaining_fertilizer[0]):
-            remaining_fertilizer[0] -= 1
-            return ["FERTILIZE"]
         if is_ready_to_harvest(tile, day):
             return ["HARVEST"]
 
@@ -540,30 +543,37 @@ def count_plant_tiles_by_crop(tiles, board_size):
 def choose_crop_to_plant(remaining_seeds, plant_counts, unlocked_quadrants, day, prices):
     target_strawberry = get_strawberry_target(unlocked_quadrants, prices)
     target_melon = get_melon_target(unlocked_quadrants, prices)
+    target_carrot = get_carrot_target(unlocked_quadrants, prices)
     wheat_established = plant_counts.get("WHEAT", 0) >= MIN_WHEAT_TILES_BEFORE_MELON
     
-    # Do not plant crops if they won't mature before the end of the 30-day season (day 29 is the last day)
-    # Strawberry: 10 days. Melon: 8 days. Carrot: 3 days. Wheat: 4 days.
-    can_plant_strawberry = day <= 19
-    can_plant_melon = day <= 21
-    can_plant_wheat = day <= 25
-    can_plant_carrot = day <= 26
+    can_plant = {
+        "STRAWBERRY": day <= 19,
+        "MELON": day <= 21,
+        "WHEAT": day <= 25,
+        "CARROT": day <= 26
+    }
+    
+    targets = {
+        "STRAWBERRY": target_strawberry,
+        "MELON": target_melon,
+        "CARROT": target_carrot,
+        "WHEAT": float('inf')
+    }
 
-    if wheat_established:
-        if can_plant_strawberry and remaining_seeds.get("STRAWBERRY", 0) > 0 and plant_counts.get("STRAWBERRY", 0) < target_strawberry:
-            return "STRAWBERRY"
-        if can_plant_melon and remaining_seeds.get("MELON", 0) > 0 and plant_counts.get("MELON", 0) < target_melon:
-            return "MELON"
-    for crop in ("WHEAT", "CARROT"):
-        if (crop == "WHEAT" and not can_plant_wheat) or (crop == "CARROT" and not can_plant_carrot):
+    # First pass: Respect targets and wheat requirement
+    for crop in CROP_PRIORITY:
+        if not can_plant.get(crop, False):
             continue
-        if remaining_seeds.get(crop, 0) > 0:
-            return crop
-    for crop in ("STRAWBERRY", "MELON"):
-        if (crop == "STRAWBERRY" and not can_plant_strawberry) or (crop == "MELON" and not can_plant_melon):
+        if crop in ("STRAWBERRY", "MELON", "CARROT") and not wheat_established:
             continue
-        if remaining_seeds.get(crop, 0) > 0:
+        if remaining_seeds.get(crop, 0) > 0 and plant_counts.get(crop, 0) < targets[crop]:
             return crop
+
+    # Second pass: Fallback if targets are met but we have seeds and empty tiles
+    for crop in CROP_PRIORITY:
+        if can_plant.get(crop, False) and remaining_seeds.get(crop, 0) > 0:
+            return crop
+
     return None
 
 
@@ -682,6 +692,8 @@ def agent(obs):
             target = get_strawberry_target(unlocked_quadrants, market_prices)
         elif crop == "MELON":
             target = get_melon_target(unlocked_quadrants, market_prices)
+        elif crop == "CARROT":
+            target = get_carrot_target(unlocked_quadrants, market_prices)
             
         if plant_counts.get(crop, 0) + seeds.get(crop, 0) >= target:
             continue
@@ -695,24 +707,7 @@ def agent(obs):
             seeds[crop] = seeds.get(crop, 0) + buy_n
             break
 
-    # --- buy fertilizer only if there's an eligible tile waiting for it -
-    #     no point holding inventory with nothing to apply it to.
-    #
-    #     IMPORTANT: do NOT locally assume this turn's purchase already
-    #     landed (no "fertilizer_n = 1" here). Per spec, player actions
-    #     process BEFORE market actions each turn - so a FERTILIZE issued
-    #     this same turn would always be evaluated before this BUY_PRODUCT
-    #     order even resolves, and the real engine would reject it every
-    #     time. This was a real bug: it created a loop of "spending"
-    #     fertilizer that was never actually available yet, discovered
-    #     via a solo-farmer test that got stuck FERTILIZE-ing the same
-    #     tile for 19 consecutive turns while everything else it owned
-    #     went unwatered and turned to weeds. Fertilizer only becomes
-    #     usable starting the turn AFTER the purchase actually lands. ---
-    fertilizer_cost = market_prices.get("FERTILIZER", FERTILIZER_COST)
-    if shed.get("FERTILIZER", 0) == 0 and money - dynamic_cash_reserve(unlocked_quadrants) >= fertilizer_cost:
-        market.append(["BUY_PRODUCT", "FERTILIZER", 1])
-        money -= fertilizer_cost
+    # BUY_PRODUCT FERTILIZER logic was removed to prevent worker paralysis
 
     # --- hire hands at the start of the day if we can afford it. Target
     #     scales with owned land (crop_target = crop_hand_target(...))
@@ -845,20 +840,15 @@ def agent(obs):
     crop_positions = [positions[i] for i in crop_unit_indices]
 
     seed_capacity = sum(seeds.values())
-    fertilizer_n = shed.get("FERTILIZER", 0)
-    targets = find_targets(tiles, board_size, day, seed_capacity, fertilizer_n)
+    targets = find_targets(tiles, board_size, day, seed_capacity)
     assignments = assign_targets(crop_positions, targets)
 
     remaining_seeds = dict(seeds)
-    remaining_fertilizer = [fertilizer_n]  # mutable single-element list, shared
-                                            # across units so a second unit
-                                            # can't apply fertilizer we no
-                                            # longer have this turn
     actions = [None] * len(positions)
     for list_i, unit_i in enumerate(crop_unit_indices):
         actions[unit_i] = decide_crop_action(
             positions[unit_i], tiles, day, remaining_seeds, assignments[list_i],
-            remaining_fertilizer, plant_counts, unlocked_quadrants, market_prices
+            plant_counts, unlocked_quadrants, market_prices
         )
 
     for slot, action in handler_slots.items():
