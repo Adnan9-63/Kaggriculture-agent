@@ -23,6 +23,9 @@ SEED = 42  # any fixed value - just needs to be the same across comparison runs
 def main():
     env = make("kaggriculture", configuration={"episodeSteps": 720, "seed": SEED}, debug=True)
     env.run([agent, "starter"])
+    with open("replay.json", "w") as f:
+        import json
+        f.write(json.dumps(env.toJSON()))
 
     steps = env.steps
     print(f"Total steps recorded: {len(steps)} (seed={SEED})")
