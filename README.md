@@ -9,12 +9,14 @@ and a dynamic market economy. Whoever has the most money at the end wins.
 
 - **Competition page:** https://kaggle.com/competitions/kaggriculture
 - **Prize pool:** $50,000 total, $5,000 to each of the top 10 places
-- **Entry deadline:** Sept 23, 2026
-- **Final submission deadline:** Sept 30, 2026
-- **Leaderboard finalizes:** ~Oct 15, 2026 (games keep running ~2 weeks after
-  final submission to reduce rating uncertainty)
-- **Ranking:** Elo-style skill rating from wins/losses/ties, finalized via a
-  Bradley-Terry tournament on the accumulated episodes
+- **Status:** **COMPLETED** (Ended September 30, 2026; finalized October 2026)
+- **Total Teams:** 10,148 teams worldwide
+- **Ranking System:** Elo-style skill rating from accumulated head-to-head episodes finalized via a Bradley-Terry tournament
+- **Final Official Standing:**
+  - **Team:** Md. Adnan (`mdadnan96` / Team ID: `16715416`)
+  - **Final Private Tournament Score:** **2,543.7** (Rank 8,067 / 10,148)
+  - **Top Private Submission Evaluation:** 2,543.7 (Day 28 CARROT / FERTILIZE hotfix)
+  - **Seeded Diagnostic Benchmark:** **$12,320** vs $3,500 opponent (+252% win margin on fixed seed=42)
 
 ## Strategy philosophy
 
